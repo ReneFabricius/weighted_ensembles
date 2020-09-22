@@ -14,12 +14,13 @@ def logit(T, eps):
 
 
 class WeightedEnsemble:
-    def __init__(self, c, k):
+    def __init__(self, c, k, PWComb):
         self.logit_eps_ = 0.00001
         self.c_ = c
         self.k_ = k
         self.coefs_ = [[[] for j in range(i + 1, k)] for i in range(k - 1)]
         self.ldas_ = [[None for j in range(i + 1, k)] for i in range(k - 1)]
+        self.PWC_ = PWComb
 
     def fit(self, MP, tar):
         class_indexes = []
@@ -64,6 +65,8 @@ class WeightedEnsemble:
                 PP = self.ldas_[fc][sc].predict_proba(X)
                 p_probs[:, fc, sc] = torch.from_numpy(PP[:, 0])
                 p_probs[:, sc, fc] = torch.from_numpy(PP[:, 1])
+
+        return self.PWC_(p_probs)
 
 
 
