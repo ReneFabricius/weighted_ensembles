@@ -14,6 +14,16 @@ def compute_acc_topk(y_cor, ps, l):
     return torch.sum(top_i == y_cor.unsqueeze(1)).item() / n
 
 
+def create_pairwise(P):
+    n, k = P.size()
+    E = torch.eye(k).cuda()
+    VE = (1 - E).unsqueeze(0).expand(n, k, k)
+    TCs = VE * P.cuda().unsqueeze(2)
+    R = TCs / (TCs + TCs.transpose(1, 2) + (TCs == 0))
+
+    return R
+
+
 def test_cifar10():
     fold = "D:\\skola\\1\\weighted_ensembles\\my_codes\\weighted_ensembles\\predictions"
 
@@ -47,11 +57,22 @@ def test_cifar10():
     tar_val = torch.cat([torch.Tensor(val_number).fill_(ci) for ci in range(k)])
     tar_test = torch.cat([torch.Tensor(per_class - val_number).fill_(ci) for ci in range(k)])
 
+    for nni in range(c):
+        acci = compute_acc_topk(tar_test.cuda(), TP_test[nni].cuda(), 1)
+        print("Accuracy of network " + str(nni) + ": " + str(acci))
+        pwtpi = create_pairwise(TP_test[nni].cuda())
+        tp_rev = m1(pwtpi)
+        accreci = compute_acc_topk(tar_test.cuda(), tp_rev.cuda(), 1)
+        print("Accuracy of recombined network " + str(nni) + ": " + str(accreci))
+
     WE = WeightedEnsemble(c, k, m1)
     WE.fit(TP_val, tar_val)
-    PP = WE.predict_proba(TP_test)
 
-    acc = compute_acc_topk(tar_test, PP, 1)
+    PP, p_probs = WE.predict_proba(TP_test)
 
-    return acc
+    # WE.test_pairwise(TP_test, tar_test)
+
+    acc = compute_acc_topk(tar_test.cuda(), PP, 1)
+
+    return acc, PP, tar_test, TP_test, p_probs
 

@@ -11,6 +11,7 @@ def m1(PP):
     E = torch.eye(k).cuda()
     Es = E.unsqueeze(0).expand(n, k, k)
     B = torch.zeros(n, k, 1).cuda()
+    B[:, k - 1, :] = 1
 
     A = (PP.sum(dim=2).diag_embed() + PP) / (k - 1) - Es
     A[:, k - 1, :] = 1
@@ -27,6 +28,7 @@ def m2(PP):
     es = torch.ones(n, k, 1, dtype=torch.get_default_dtype()).cuda()
     zs = torch.zeros(n, 1, 1).cuda()
     B = torch.zeros(n, k + 1, 1).cuda()
+    B[:, k, :] = 1
 
     Q = (PP * PP).sum(dim=1).diag_embed() - PP * PP.transpose(1, 2)
     A = torch.cat((Q, es), 2)
