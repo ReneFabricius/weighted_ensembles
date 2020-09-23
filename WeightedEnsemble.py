@@ -44,8 +44,8 @@ class WeightedEnsemble:
                 mask_sc = (y == sc)
                 y[mask_fc] = 1
                 y[mask_sc] = 0
-                clf = LinearDiscriminantAnalysis()
 
+                clf = LinearDiscriminantAnalysis()
                 clf.fit(X, y)
 
                 self.ldas_[fc][sc] = clf
@@ -71,12 +71,12 @@ class WeightedEnsemble:
                 # Obtains fc and sc probabilities for all classes
                 SS = MP[:, :, [fc, sc]].cuda()
                 # Computes p_ij pairwise probabilities for above mentioned samples
-                PWP = torch.true_divide(SS[:, :, 0], torch.sum(SS, 2))
+                PWP = torch.true_divide(SS[:, :, 0], torch.sum(SS, 2) + (SS[:, :, 0] == 0))
                 LI = logit(PWP, self.logit_eps_)
                 X = LI.transpose(0, 1).cpu()
                 PP = self.ldas_[fc][sc].predict_proba(X)
-                p_probs[:, fc, sc] = torch.from_numpy(PP[:, 0])
-                p_probs[:, sc, fc] = torch.from_numpy(PP[:, 1])
+                p_probs[:, sc, fc] = torch.from_numpy(PP[:, 0])
+                p_probs[:, fc, sc] = torch.from_numpy(PP[:, 1])
 
         return self.PWC_(p_probs.cuda()), p_probs
 

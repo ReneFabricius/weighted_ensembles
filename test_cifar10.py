@@ -74,5 +74,7 @@ def test_cifar10():
 
     acc = compute_acc_topk(tar_test.cuda(), PP, 1)
 
-    return acc, PP, tar_test, TP_test, p_probs
+    print("Accuracy of model: " + str(acc))
+
+    return acc, PP
 
