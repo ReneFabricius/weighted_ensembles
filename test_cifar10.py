@@ -60,13 +60,15 @@ def test_cifar10():
     for nni in range(c):
         acci = compute_acc_topk(tar_test.cuda(), TP_test[nni].cuda(), 1)
         print("Accuracy of network " + str(nni) + ": " + str(acci))
+        '''
         pwtpi = create_pairwise(TP_test[nni].cuda())
         tp_rev = m1(pwtpi)
         accreci = compute_acc_topk(tar_test.cuda(), tp_rev.cuda(), 1)
         print("Accuracy of recombined network " + str(nni) + ": " + str(accreci))
+        '''
 
     WE = WeightedEnsemble(c, k, m1)
-    WE.fit(TP_val, tar_val)
+    WE.fit(TP_val, tar_val, True)
 
     PP, p_probs = WE.predict_proba(TP_test)
 
