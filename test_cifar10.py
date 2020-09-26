@@ -4,7 +4,7 @@ import os
 import torchvision
 import torchvision.transforms as transforms
 from my_codes.weighted_ensembles.WeightedEnsemble import WeightedEnsemble
-from my_codes.weighted_ensembles.SimplePWCombine import m1, m2
+from my_codes.weighted_ensembles.SimplePWCombine import m1, m2, bc
 
 
 def compute_acc_topk(y_cor, ps, l):
@@ -67,7 +67,7 @@ def test_cifar10():
         print("Accuracy of recombined network " + str(nni) + ": " + str(accreci))
         '''
 
-    WE = WeightedEnsemble(c, k, m1)
+    WE = WeightedEnsemble(c, k, bc)
     WE.fit(TP_val, tar_val, True)
 
     PP, p_probs = WE.predict_proba(TP_test)

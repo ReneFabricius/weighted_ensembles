@@ -41,6 +41,7 @@ def m2(PP):
 def bc(PP):
     n, k, kk = PP.size()
     assert k == kk
+    eps = 1e-5
 
     MMi = (1/k)*(torch.eye(k - 1) + torch.ones(k - 1, k - 1)).cuda()
     rws = int(k * (k - 1) / 2)
@@ -60,10 +61,13 @@ def bc(PP):
     MMiM = torch.matmul(MMi, M.T)
 
     rv = PP[:, torch.triu(torch.ones(k, k).cuda(), 1) == 1].T
+    small = eps*torch.ones(rv.size()).cuda()
+    rv = torch.where(rv < eps, small, rv)
+    rv = torch.where(rv > 1 - eps, 1 - small, rv)
     s = torch.log(1 / rv - 1)
     u = torch.matmul(MMiM, s)
     zs = torch.zeros(1, n)
     u_exp = torch.exp(torch.cat([zs.cuda(), u], dim=0))
-    p = u_exp / torch.sum(u_exp, dim=0)
+    ps = u_exp / torch.sum(u_exp, dim=0)
 
-    return p
+    return ps.T

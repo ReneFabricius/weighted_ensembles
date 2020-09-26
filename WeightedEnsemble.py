@@ -23,7 +23,7 @@ def pairwise_precisions(SS, tar):
 
 class WeightedEnsemble:
     def __init__(self, c, k, PWComb):
-        self.logit_eps_ = 0.00001
+        self.logit_eps_ = 1e-5
         self.c_ = c
         self.k_ = k
         self.coefs_ = [[[] for j in range(k)] for i in range(k)]
