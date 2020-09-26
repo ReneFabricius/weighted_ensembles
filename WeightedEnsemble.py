@@ -31,6 +31,7 @@ class WeightedEnsemble:
         self.PWC_ = PWComb
 
     def fit(self, MP, tar, verbose=False):
+        """Trains lda for every pair of classes"""
         for fc in range(self.k_):
             for sc in range(fc + 1, self.k_):
                 # Obtains fc and sc probabilities for samples belonging to those classes
@@ -103,3 +104,33 @@ class WeightedEnsemble:
                     "\n\tintercept: " + str(self.ldas_[fc][sc].intercept_))
 
                 print("\tcombined accuracy: " + str(self.ldas_[fc][sc].score(X, y)))
+
+    def predict_proba_topl(self, MP, l):
+        c, n, k = MP.size()
+        assert c == self.c_
+        assert k == self.k_
+
+        ps = torch.zeros(n, k).cuda()
+        # Every sample may have different set of top classes, so we process them one by one
+        for ni in range(n):
+            val, ind = torch.topk(MP[:, ni, :], l, dim=1)
+            Ti = list(set(ind.flatten().tolist()))
+            tcc = len(Ti)
+            p_probs = torch.zeros(1, tcc, tcc).cuda()
+            for fci, fc in enumerate(Ti):
+                for sci, sc in enumerate(Ti[fci + 1:]):
+                    # Obtains fc and sc probabilities for current sample
+                    SS = MP[:, ni, [fc, sc]].cuda()
+                    # Computes p_ij pairwise probabilities for above mentioned samples
+                    PWP = torch.true_divide(SS[:, 0], torch.sum(SS, 1) + (SS[:, 0] == 0))
+                    LI = logit(PWP, self.logit_eps_)
+                    X = LI.T.unsqueeze(0).cpu()
+                    PP = self.ldas_[fc][sc].predict_proba(X)
+                    p_probs[:, fci + 1 + sci, fci] = torch.from_numpy(PP[:, 0])
+                    p_probs[:, fci, fci + 1 + sci] = torch.from_numpy(PP[:, 1])
+
+            sam_ps = self.PWC_(p_probs.cuda())
+            ps[ni, Ti] = sam_ps.squeeze()
+
+        return ps
+

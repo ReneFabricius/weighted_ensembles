@@ -70,13 +70,18 @@ def test_cifar10():
     WE = WeightedEnsemble(c, k, bc)
     WE.fit(TP_val, tar_val, True)
 
-    PP, p_probs = WE.predict_proba(TP_test)
+    with torch.no_grad():
+        PP, p_probs = WE.predict_proba(TP_test)
+
+        PPtl = WE.predict_proba_topl(TP_test, 5)
 
     # WE.test_pairwise(TP_test, tar_test)
 
     acc = compute_acc_topk(tar_test.cuda(), PP, 1)
+    acctl = compute_acc_topk(tar_test.cuda(), PPtl, 1)
 
     print("Accuracy of model: " + str(acc))
+    print("Accuracy of topl model: " + str(acctl))
 
     return acc, PP
 
