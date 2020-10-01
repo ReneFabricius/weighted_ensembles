@@ -1,0 +1,6 @@
+Accuracy of network DenseNet121.npy: 0.7452
+Accuracy of network ResNet152V2.npy: 0.72768
+Accuracy of network VGG19.npy: 0.71256
+Starting predict proba
+Predict proba finished in 1086.9949756 s
+Accuracy of topl model: 0.7824

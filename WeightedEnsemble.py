@@ -4,6 +4,9 @@ import os
 import torchvision
 import torchvision.transforms as transforms
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+import pickle
+
+from timeit import default_timer as timer
 
 
 def logit(T, eps):
@@ -32,8 +35,14 @@ class WeightedEnsemble:
 
     def fit(self, MP, tar, verbose=False):
         """Trains lda for every pair of classes"""
+        print("Starting fit")
+        num = self.k_*(self.k_ - 1)//2
+        print_step = num // 100
+        pi = 0
         for fc in range(self.k_):
             for sc in range(fc + 1, self.k_):
+                if pi % print_step == 0:
+                    print("Fit progress " + str(pi // print_step) + "%", end="\r")
                 # Obtains fc and sc probabilities for samples belonging to those classes
                 SS = MP[:, (tar == fc) + (tar == sc)][:, :, [fc, sc]].cuda()
                 # Computes p_ij pairwise probabilities for above mentioned samples
@@ -46,9 +55,8 @@ class WeightedEnsemble:
                 y[mask_fc] = 1
                 y[mask_sc] = 0
 
-                clf = LinearDiscriminantAnalysis()
+                clf = LinearDiscriminantAnalysis(solver='lsqr')
                 clf.fit(X, y)
-
                 self.ldas_[fc][sc] = clf
                 self.coefs_[fc][sc] = [clf.coef_, clf.intercept_]
 
@@ -60,6 +68,8 @@ class WeightedEnsemble:
                           "\n\tintercept: " + str(clf.intercept_))
 
                     print("\tcombined accuracy: " + str(clf.score(X, y)))
+
+                pi += 1
 
     def predict_proba(self, MP):
         c, n, k = MP.size()
@@ -106,15 +116,21 @@ class WeightedEnsemble:
                 print("\tcombined accuracy: " + str(self.ldas_[fc][sc].score(X, y)))
 
     def predict_proba_topl(self, MP, l):
+        print("Starting predict proba")
+        start = timer()
         c, n, k = MP.size()
         assert c == self.c_
         assert k == self.k_
 
         ps = torch.zeros(n, k).cuda()
         # Every sample may have different set of top classes, so we process them one by one
+        print_step = n // 100
         for ni in range(n):
+            if ni % print_step == 0:
+                print("Predicting proba progress " + str(ni//print_step) + "%", end="\r")
+
             val, ind = torch.topk(MP[:, ni, :], l, dim=1)
-            Ti = list(set(ind.flatten().tolist()))
+            Ti = sorted(list(set(ind.flatten().tolist())))
             tcc = len(Ti)
             p_probs = torch.zeros(1, tcc, tcc).cuda()
             for fci, fc in enumerate(Ti):
@@ -132,5 +148,16 @@ class WeightedEnsemble:
             sam_ps = self.PWC_(p_probs.cuda())
             ps[ni, Ti] = sam_ps.squeeze()
 
+        end = timer()
+        print("Predict proba finished in " + str(end - start) + " s")
+
         return ps
+
+    def save_models(self, file):
+        with open(file, 'wb') as f:
+            pickle.dump(self.ldas_, f)
+
+    def load_models(self, file):
+        with open(file, 'rb') as f:
+            self.ldas_ = pickle.load(f)
 
