@@ -31,7 +31,7 @@ def test_imagenet():
         acci = compute_acc_topk(tar.cuda(), tcs[nni].cuda(), 1)
         print("Accuracy of network " + str(names[inds_to_combine[nni]]) + ": " + str(acci))
 
-    WE = WeightedEnsemble(c, k, bc)
+    WE = WeightedEnsemble(c, k)
     #WE.fit(tcs, tar, False)
 
     #WE.save_models(models_file)
@@ -40,7 +40,7 @@ def test_imagenet():
 
 
     with torch.no_grad():
-        PPtl = WE.predict_proba_topl(tcs, 5)
+        PPtl = WE.predict_proba_topl(tcs, 5, bc)
 
 
     acctl = compute_acc_topk(tar.cuda(), PPtl, 1)

@@ -67,21 +67,27 @@ def test_cifar10():
         print("Accuracy of recombined network " + str(nni) + ": " + str(accreci))
         '''
 
-    WE = WeightedEnsemble(c, k, bc)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    WE = WeightedEnsemble(c, k, device)
     WE.fit(TP_val, tar_val, True)
 
     with torch.no_grad():
-        PP, p_probs = WE.predict_proba(TP_test)
+        PP, p_probs = WE.predict_proba(TP_test.cuda(), bc)
 
-        PPtl = WE.predict_proba_topl(TP_test, 5)
+        PPtl = WE.predict_proba_topl(TP_test.cuda(), 5, bc)
+
+        PPtlf = WE.predict_proba_topl_fast(TP_test.cuda(), 5, bc)
 
     # WE.test_pairwise(TP_test, tar_test)
 
     acc = compute_acc_topk(tar_test.cuda(), PP, 1)
     acctl = compute_acc_topk(tar_test.cuda(), PPtl, 1)
+    acctlf = compute_acc_topk(tar_test.cuda(), PPtlf, 1)
 
     print("Accuracy of model: " + str(acc))
     print("Accuracy of topl model: " + str(acctl))
+    print("Accuracy of topl fast model: " + str(acctlf))
 
     return acc, PP
 
