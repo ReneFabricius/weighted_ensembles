@@ -1,10 +1,8 @@
 import numpy as np
 import torch
-import os
-import torchvision
-import torchvision.transforms as transforms
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 import pickle
+import pandas as pd
 
 from timeit import default_timer as timer
 
@@ -30,7 +28,7 @@ def pairwise_precisions(SS, tar):
 
 
 class WeightedEnsemble:
-    def __init__(self, c, k, device):
+    def __init__(self, c=0, k=0, device=torch.device("cpu")):
         self.dev_ = device
         self.logit_eps_ = 1e-5
         self.c_ = c
@@ -278,9 +276,30 @@ class WeightedEnsemble:
         with open(file, 'rb') as f:
             self.ldas_ = pickle.load(f)
 
-        for fc in range(self.k_):
-            for sc in range(fc + 1, self.k_):
+        self.k_ = len(self.ldas_)
+        if self.k_ > 0:
+            self.c_ = len(self.ldas_[0][1].coef_[0])
+
+        self.coefs_ = torch.zeros(self.k_, self.k_, self.c_ + 1).to(self.dev_)
+
+        for fc in range(len(self.ldas_)):
+            for sc in range(fc + 1, len(self.ldas_[fc])):
                 clf = self.ldas_[fc][sc]
                 self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_).to(self.dev_).squeeze(),
                                                     torch.tensor(clf.intercept_).to(self.dev_)))
+
+    def save_coefs_csv(self, file):
+        Ls = [None] * ((self.k_ * (self.k_ - 1)) // 2)
+        li = 0
+        cols = ["i", "j"] + ["coef" + str(k) for k in range(self.c_)] + ["interc"]
+        for i in range(self.k_):
+            for j in range(i + 1, self.k_):
+                cfs = [[i, j] + self.coefs_[i, j].tolist()]
+                Ls[li] = pd.DataFrame(cfs, columns=cols)
+                li += 1
+
+        df = pd.concat(Ls, ignore_index=True)
+        df.to_csv(file, index=False)
+
+
 

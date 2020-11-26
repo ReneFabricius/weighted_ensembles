@@ -25,7 +25,8 @@ def create_pairwise(P):
 
 
 def test_cifar10():
-    fold = "D:\\skola\\1\\weighted_ensembles\\my_codes\\weighted_ensembles\\predictions"
+    fold = "D:\\skola\\1\\weighted_ensembles\\tests_cifar\\predictions"
+    coefs_csv = "D:\\skola\\1\\weighted_ensembles\\tests_cifar\\lda_coefficients.csv"
 
     def process_file(n):
         M = torch.tensor(np.load(os.path.join(fold, n)), dtype=torch.float32)
@@ -37,7 +38,7 @@ def test_cifar10():
     c, n, k = tcs.size()
     TP = torch.nn.Softmax(dim=2)(tcs)
 
-    testset = torchvision.datasets.CIFAR10(root='./data', train=False,
+    testset = torchvision.datasets.CIFAR10(root='D:\\skola\\1\\weighted_ensembles\\tests_cifar\\data', train=False,
                                            download=True, transform=transforms.ToTensor())
     y_test = torch.tensor(testset.targets)
 
@@ -71,6 +72,8 @@ def test_cifar10():
 
     WE = WeightedEnsemble(c, k, device)
     WE.fit(TP_val, tar_val, True)
+
+    WE.save_coefs_csv(coefs_csv)
 
     with torch.no_grad():
         PP, p_probs = WE.predict_proba(TP_test.cuda(), bc)
