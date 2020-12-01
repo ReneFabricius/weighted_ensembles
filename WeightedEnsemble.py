@@ -167,6 +167,7 @@ class WeightedEnsemble:
         return ps
 
     def predict_proba_topl_fast(self, MP, l, PWComb):
+        """Should produce same results as predict_proba_topl"""
         print("Starting predict proba topl fast")
         start = timer()
         c, n, k = MP.size()

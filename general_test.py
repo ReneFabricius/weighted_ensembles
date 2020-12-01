@@ -7,7 +7,7 @@ from my_codes.weighted_ensembles.WeightedEnsemble import WeightedEnsemble
 
 
 def test_folder(train_folder, test_folder, targets, order, output_folder, output_model_fold, comb_methods,
-                models_load_file=None, combining_topl=5, testing_topk=1, save_coefs=False):
+                models_load_file=None, combining_topl=5, testing_topk=1, save_coefs=False, verbose=False):
     extension = '.npy'
     models_file = 'models'
 
@@ -51,7 +51,7 @@ def test_folder(train_folder, test_folder, targets, order, output_folder, output
 
         WE = WeightedEnsemble(c=c, k=k, device=device)
 
-        WE.fit(tcs, tar, False)
+        WE.fit(tcs, tar, verbose)
         WE.save_models(os.path.join(output_model_fold, models_file))
     else:
         WE = WeightedEnsemble(device=device)

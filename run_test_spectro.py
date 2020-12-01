@@ -12,7 +12,8 @@ test_folder(
     models_load_file=None,
     combining_topl=2,
     testing_topk=1,
-    save_coefs=True)
+    save_coefs=True,
+    verbose=True)
 
 test_folder(
     train_folder="D:\\skola\\1\\weighted_ensembles\\tests_spectro\\eval_mavd_3_val_proba",
