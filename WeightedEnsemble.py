@@ -3,6 +3,7 @@ import torch
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 import pickle
 import pandas as pd
+from statsmodels.stats.diagnostic import normal_ad
 
 from timeit import default_timer as timer
 
@@ -19,7 +20,7 @@ def logit_sparse(T, eps):
     return torch.sparse_coo_tensor(T.indices(), Vli, T.shape)
 
 
-def pairwise_precisions(SS, tar):
+def pairwise_accuracies(SS, tar):
     c, n, k = SS.size()
     top_v, top_i = torch.topk(SS, 1, dim=2)
     ti = top_i.squeeze(dim=2)
@@ -29,35 +30,60 @@ def pairwise_precisions(SS, tar):
 
 class WeightedEnsemble:
     def __init__(self, c=0, k=0, device=torch.device("cpu")):
+        """
+
+        :param c: Number of classifiers
+        :param k: Number of classes
+        :param device:
+        """
         self.dev_ = device
         self.logit_eps_ = 1e-5
         self.c_ = c
         self.k_ = k
         self.coefs_ = torch.zeros(k, k, c + 1).to(self.dev_)
         self.ldas_ = [[None for j in range(k)] for i in range(k)]
+        self.pvals_ = None
 
-    def fit(self, MP, tar, verbose=False):
+    def fit(self, MP, tar, verbose=False, test_normality=False):
         """Trains lda for every pair of classes"""
         print("Starting fit")
         start = timer()
-        num = self.k_*(self.k_ - 1)//2
+        num = self.k_*(self.k_ - 1)//2      # Number of pairs of classes
+        if test_normality:
+            self.pvals_ = torch.zeros(num, 2, self.c_).to(torch.device("cpu"))
         print_step = num // 100
         pi = 0
         for fc in range(self.k_):
             for sc in range(fc + 1, self.k_):
                 if print_step > 0 and pi % print_step == 0:
                     print("Fit progress " + str(pi // print_step) + "%", end="\r")
-                # Obtains fc and sc probabilities for samples belonging to those classes
+
+                # k x s x 2 tensor, where s is number of samples in classes fc and sc.
+                # Tensor contains supports of networks for classes fc, sc for samples belonging to fc, sc.
                 SS = MP[:, (tar == fc) + (tar == sc)][:, :, [fc, sc]].to(self.dev_)
-                # Computes p_ij pairwise probabilities for above mentioned samples
+                # k x s tensor containing p_fc,sc pairwise probabilities for above mentioned samples
                 PWP = torch.true_divide(SS[:, :, 0], torch.sum(SS, 2) + (SS[:, :, 0] == 0))
                 LI = logit(PWP, self.logit_eps_)
+                # k x s tensor of logit supports of k networks for class fc against class sc for s samples
                 X = LI.transpose(0, 1).cpu()
+                # Prepare targets
                 y = tar[(tar == fc) + (tar == sc)]
                 mask_fc = (y == fc)
                 mask_sc = (y == sc)
                 y[mask_fc] = 1
                 y[mask_sc] = 0
+
+                if test_normality:
+                    # Test normality of predictors
+                    fc_pval = torch.tensor([normal_ad(X[y == 1][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
+                    sc_pval = torch.tensor([normal_ad(X[y == 0][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
+                    self.pvals_[pi, 0, :] = fc_pval
+                    self.pvals_[pi, 1, :] = sc_pval
+                    if verbose:
+                        print("P-values of normality test for class " + str(fc))
+                        print(str(fc_pval))
+                        print("P-values of normality test for class " + str(sc))
+                        print(str(sc_pval))
 
                 clf = LinearDiscriminantAnalysis(solver='lsqr')
                 clf.fit(X, y)
@@ -66,7 +92,7 @@ class WeightedEnsemble:
                                                     torch.tensor(clf.intercept_).to(self.dev_)))
 
                 if verbose:
-                    pwacc = pairwise_precisions(SS, y)
+                    pwacc = pairwise_accuracies(SS, y)
                     print("Training pairwise accuracies for classes: " + str(fc) + ", " + str(sc) +
                           "\n\tpairwise accuracies: " + str(pwacc) +
                           "\n\tchosen coefficients: " + str(clf.coef_) +
@@ -75,6 +101,12 @@ class WeightedEnsemble:
                     print("\tcombined accuracy: " + str(clf.score(X, y)))
 
                 pi += 1
+
+        if test_normality and verbose:
+            blw_5 = torch.sum(self.pvals_ < 0.05)
+            blw_1 = torch.sum(self.pvals_ < 0.01)
+            print("Number of classes with pval below 5% " + str(blw_5.item()))
+            print("Number of classes with pval below 1% " + str(blw_1.item()))
 
         end = timer()
         print("Fit finished in " + str(end - start) + " s")
@@ -102,7 +134,7 @@ class WeightedEnsemble:
         end = timer()
         print("Predict proba finished in " + str(end - start) + " s")
 
-        return PWComb(p_probs.to(self.dev_)), p_probs
+        return PWComb(p_probs.to(self.dev_))
 
     def test_pairwise(self, MP, tar):
         for fc in range(self.k_):
@@ -119,7 +151,7 @@ class WeightedEnsemble:
                 y[mask_fc] = 1
                 y[mask_sc] = 0
 
-                pwacc = pairwise_precisions(SS, y)
+                pwacc = pairwise_accuracies(SS, y)
                 print(
                     "Testing pairwise accuracies for classes: " + str(fc) + ", " + str(sc) +
                     "\n\tpairwise accuracies: " + str(pwacc) +
@@ -302,5 +334,10 @@ class WeightedEnsemble:
         df = pd.concat(Ls, ignore_index=True)
         df.to_csv(file, index=False)
 
+    def save_pvals(self, file):
+        if self.pvals_ is not None:
+            np.save(file, self.pvals_)
+        else:
+            print("P-values not computed")
 
 

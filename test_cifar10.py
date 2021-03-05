@@ -76,7 +76,7 @@ def test_cifar10():
     WE.save_coefs_csv(coefs_csv)
 
     with torch.no_grad():
-        PP, p_probs = WE.predict_proba(TP_test.cuda(), bc)
+        PP = WE.predict_proba(TP_test.cuda(), bc)
 
         PPtl = WE.predict_proba_topl(TP_test.cuda(), 5, bc)
 
