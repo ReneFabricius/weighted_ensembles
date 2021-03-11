@@ -7,13 +7,6 @@ from my_codes.weighted_ensembles.WeightedEnsemble import WeightedEnsemble
 from my_codes.weighted_ensembles.SimplePWCombine import m1, m2, bc
 
 
-def compute_acc_topk(y_cor, ps, l):
-    top_v, top_i = torch.topk(ps, l, dim=1)
-    n = y_cor.size()[0]
-
-    return torch.sum(top_i == y_cor.unsqueeze(1)).item() / n
-
-
 def create_pairwise(P):
     n, k = P.size()
     E = torch.eye(k).cuda()
