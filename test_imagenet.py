@@ -1,7 +1,7 @@
 import os
 import torch
 import numpy as np
-from my_codes.weighted_ensembles.test_cifar10 import compute_acc_topk
+from my_codes.weighted_ensembles.predictions_evaluation import compute_acc_topk
 from my_codes.weighted_ensembles.WeightedEnsemble import WeightedEnsemble
 from my_codes.weighted_ensembles.SimplePWCombine import m1, m2, bc
 

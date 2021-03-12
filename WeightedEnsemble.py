@@ -31,10 +31,10 @@ def pairwise_accuracies(SS, tar):
 class WeightedEnsemble:
     def __init__(self, c=0, k=0, device=torch.device("cpu")):
         """
-
+        Trainable ensembling of classification posteriors.
         :param c: Number of classifiers
         :param k: Number of classes
-        :param device:
+        :param device: Torch device to use for computations
         """
         self.dev_ = device
         self.logit_eps_ = 1e-5
@@ -45,11 +45,20 @@ class WeightedEnsemble:
         self.pvals_ = None
 
     def fit(self, MP, tar, verbose=False, test_normality=False):
-        """Trains lda for every pair of classes"""
+        """
+        Trains lda for every pair of classes
+        :param MP: c x n x k tensor of constituent classifiers outputs.
+        c - number of constituent classifiers, n - number of training samples, k - number of classes
+        :param tar: n tensor of sample labels
+        :param verbose: print more detailed output
+        :param test_normality: test normality of lda predictors for each class in each class pair
+        :return:
+        """
+
         print("Starting fit")
         start = timer()
         with torch.no_grad():
-            num = self.k_*(self.k_ - 1)//2      # Number of pairs of classes
+            num = self.k_ * (self.k_ - 1) // 2      # Number of pairs of classes
             if test_normality:
                 self.pvals_ = torch.zeros(num, 2, self.c_).to(torch.device("cpu"))
             print_step = num // 100
@@ -58,10 +67,7 @@ class WeightedEnsemble:
             if num_non_one > 0:
                 print("Warning: " + str(num_non_one) +
                       " samples with non unit sum of supports found, performing softmax")
-                if self.dev_.type == 'cpu':
-                    MP = torch.nn.Softmax(dim=2)(MP)
-                else:
-                    MP = torch.nn.Softmax(dim=2)(MP.to(self.dev_)).cpu()
+                MP = self.softmax_supports(MP)
 
             pi = 0
             for fc in range(self.k_):
@@ -125,12 +131,25 @@ class WeightedEnsemble:
         print("Fit finished in " + str(end - start) + " s")
 
     def predict_proba(self, MP, PWComb):
+        """
+        Combines outputs of constituent classifiers using all classes.
+        :param MP: c x n x k tensor of constituent classifiers posteriors
+        c - number of constituent classifiers, n - number of training samples, k - number of classes
+        :param PWComb: coupling method to use
+        :return: n x k tensor of combined posteriors
+        """
         print("Starting predict proba")
         start = timer()
         c, n, k = MP.size()
         assert c == self.c_
         assert k == self.k_
         p_probs = torch.Tensor(n, k, k)
+
+        num_non_one = torch.sum(torch.abs(torch.sum(MP, dim=2) - 1.0) > self.logit_eps_).item()
+        if num_non_one > 0:
+            print("Warning: " + str(num_non_one) +
+                  " samples with non unit sum of supports found, performing softmax")
+            MP = self.softmax_supports(MP)
 
         for fc in range(self.k_):
             for sc in range(fc + 1, self.k_):
@@ -174,11 +193,26 @@ class WeightedEnsemble:
                 print("\tcombined accuracy: " + str(self.ldas_[fc][sc].score(X, y)))
 
     def predict_proba_topl(self, MP, l, PWComb):
+        """
+        Combines outputs of constituent classifiers using only those classes, which are among the top l most probable
+        for some constituent classifier.
+        :param MP: MP: c x n x k tensor of constituent classifiers posteriors
+        c - number of constituent classifiers, n - number of training samples, k - number of classes
+        :param l: how many most probable classes for each constituent classifier to consider
+        :param PWComb: coupling method to use
+        :return: n x k tensor of combined posteriors
+        """
         print("Starting predict proba topl")
         start = timer()
         c, n, k = MP.size()
         assert c == self.c_
         assert k == self.k_
+
+        num_non_one = torch.sum(torch.abs(torch.sum(MP, dim=2) - 1.0) > self.logit_eps_).item()
+        if num_non_one > 0:
+            print("Warning: " + str(num_non_one) +
+                  " samples with non unit sum of supports found, performing softmax")
+            MP = self.softmax_supports(MP)
 
         ps = torch.zeros(n, k).to(self.dev_)
         # Every sample may have different set of top classes, so we process them one by one
@@ -212,12 +246,27 @@ class WeightedEnsemble:
         return ps
 
     def predict_proba_topl_fast(self, MP, l, PWComb):
-        """Should produce same results as predict_proba_topl"""
+        """
+        Better optimized version of predict_proba_topl
+        Combines outputs of constituent classifiers using only those classes, which are among the top l most probable
+        for some constituent classifier.
+        :param MP: MP: c x n x k tensor of constituent classifiers posteriors
+        c - number of constituent classifiers, n - number of training samples, k - number of classes
+        :param l: how many most probable classes for each constituent classifier to consider
+        :param PWComb: coupling method to use
+        :return: n x k tensor of combined posteriors
+        """
         print("Starting predict proba topl fast")
         start = timer()
         c, n, k = MP.size()
         assert c == self.c_
         assert k == self.k_
+
+        num_non_one = torch.sum(torch.abs(torch.sum(MP, dim=2) - 1.0) > self.logit_eps_).item()
+        if num_non_one > 0:
+            print("Warning: " + str(num_non_one) +
+                  " samples with non unit sum of supports found, performing softmax")
+            MP = self.softmax_supports(MP)
 
         MP = MP.to(self.dev_)
         val, ind = torch.topk(MP, l, dim=2)
@@ -260,7 +309,7 @@ class WeightedEnsemble:
             pcPWP = pcMPpR / (pcMPpR + pcMPpC)
 
             # logit pairwise probs
-            pcLI = logit(pcPWP, 1e-5)
+            pcLI = logit(pcPWP, self.logit_eps_)
             # Flattened logits in order of dimensions: pcn; kxk top right triangle by rows; c
             pcLIflat = pcLI.transpose(1, 2).flatten()
 
@@ -313,11 +362,21 @@ class WeightedEnsemble:
         return ps
 
     def save_models(self, file):
+        """
+        Save trained lda models into a file.
+        :param file: file to save the models to
+        :return:
+        """
         print("Saving models into file: " + str(file))
         with open(file, 'wb') as f:
             pickle.dump(self.ldas_, f)
 
     def load_models(self, file):
+        """
+        Load trained lda models from a file
+        :param file: file to load the models from
+        :return:
+        """
         print("Loading models from file: " + str(file))
         with open(file, 'rb') as f:
             self.ldas_ = pickle.load(f)
@@ -335,6 +394,11 @@ class WeightedEnsemble:
                                                     torch.tensor(clf.intercept_).to(self.dev_)))
 
     def save_coefs_csv(self, file):
+        """
+        Save trained lda coefficients into a csv file.
+        :param file: file to save the coefficients to
+        :return:
+        """
         Ls = [None] * ((self.k_ * (self.k_ - 1)) // 2)
         li = 0
         cols = ["i", "j"] + ["coef" + str(k) for k in range(self.c_)] + ["interc"]
@@ -348,6 +412,11 @@ class WeightedEnsemble:
         df.to_csv(file, index=False)
 
     def save_pvals(self, file):
+        """
+        Save normality test p-values into a file, if these were computed during the training.
+        :param file: file to save the p-values to
+        :return:
+        """
         print("Saving pvals into file: " + str(file))
         if self.pvals_ is not None:
             np.save(file, self.pvals_)
@@ -355,9 +424,23 @@ class WeightedEnsemble:
             print("P-values not computed")
 
     def set_averaging_weights(self):
+        """
+        Set the lda weights equal to one.
+        :return:
+        """
         for fc in range(self.k_):
             for sc in range(fc + 1, self.k_):
                 self.coefs_[fc, sc, :] = torch.tensor([1]*self.c_ + [0])
 
+    def softmax_supports(self, MP):
+        """
+        Performs softmax on posteriors
+        :param MP: c x n x k tensor of class supports
+        c - number of constituent classifiers, n - number of training samples, k - number of classes
+        :return:c x n x k tensor of posteriors
+        """
+        if self.dev_.type == 'cpu':
+            return torch.nn.Softmax(dim=2)(MP)
 
+        return torch.nn.Softmax(dim=2)(MP.to(self.dev_)).cpu()
 
