@@ -1,5 +1,5 @@
 import torch
-from my_codes.weighted_ensembles.WeightedEnsemble import pairwise_accuracies, logit
+from my_codes.weighted_ensembles.WeightedLDAEnsemble import pairwise_accuracies, logit
 
 
 def compute_pairwise_accuracies(MP, tar):

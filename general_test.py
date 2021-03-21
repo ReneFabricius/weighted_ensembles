@@ -3,12 +3,12 @@ import torch
 import numpy as np
 import functools
 from my_codes.weighted_ensembles.predictions_evaluation import compute_acc_topk
-from my_codes.weighted_ensembles.WeightedEnsemble import WeightedEnsemble
+from my_codes.weighted_ensembles.WeightedLDAEnsemble import WeightedLDAEnsemble
 
 
 def test_folder(train_folder, test_folder, targets, order, output_folder, output_model_fold, comb_methods,
                 models_load_file=None, combining_topl=5, testing_topk=1, save_coefs=False, verbose=False,
-                test_normality=False, save_pvals=False):
+                test_normality=False, save_pvals=False, fit_on_penultimate=False):
     """
     Trains a combiner on provided networks outputs - train_folder (or loads models if models_load_file is provided)
     and tests it on outputs in test_folder
@@ -76,15 +76,18 @@ def test_folder(train_folder, test_folder, targets, order, output_folder, output
             print("Accuracy of train input (topk " + str(testing_topk) + ") " + str(npy_files_train[nni]) +
                   ": " + str(acci))
 
-        WE = WeightedEnsemble(c=c, k=k, device=device)
+        WE = WeightedLDAEnsemble(c=c, k=k, device=device)
 
-        WE.fit(tcs, tar, verbose, test_normality)
-        WE.save_models(os.path.join(output_model_fold, models_file))
+        if not fit_on_penultimate:
+            WE.fit(tcs, tar, verbose, test_normality)
+        else:
+            WE.fit_penultimate(tcs, tar, verbose, test_normality)
+        WE.save(os.path.join(output_model_fold, models_file))
         if save_pvals:
             WE.save_pvals(os.path.join(output_folder, "p_values.npy"))
     else:
-        WE = WeightedEnsemble(device=device)
-        WE.load_models(models_load_file)
+        WE = WeightedLDAEnsemble(device=device)
+        WE.load(models_load_file)
         c = WE.c_
         k = WE.k_
 
@@ -161,7 +164,7 @@ def test_averaging_combination(test_folder, targets, order, output_folder, comb_
     tcs_test = torch.cat(list(map(functools.partial(process_file, fold=test_folder), np.array(npy_files_test))), 0)
 
     c, n, k = tcs_test.size()
-    WE = WeightedEnsemble(c=c, k=k, device=device)
+    WE = WeightedLDAEnsemble(c=c, k=k, device=device)
     WE.set_averaging_weights()
 
     has_test_tar = os.path.isfile(os.path.join(test_folder, targets))

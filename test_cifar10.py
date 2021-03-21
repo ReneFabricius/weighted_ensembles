@@ -3,7 +3,7 @@ import torch
 import os
 import torchvision
 import torchvision.transforms as transforms
-from my_codes.weighted_ensembles.WeightedEnsemble import WeightedEnsemble
+from my_codes.weighted_ensembles.WeightedLDAEnsemble import WeightedLDAEnsemble
 from my_codes.weighted_ensembles.SimplePWCombine import m1, m2, bc
 
 
@@ -63,7 +63,7 @@ def test_cifar10():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    WE = WeightedEnsemble(c, k, device)
+    WE = WeightedLDAEnsemble(c, k, device)
     WE.fit(TP_val, tar_val, True)
 
     WE.save_coefs_csv(coefs_csv)

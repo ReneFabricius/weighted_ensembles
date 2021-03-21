@@ -28,7 +28,7 @@ def pairwise_accuracies(SS, tar):
     return torch.sum(ti.cpu() != tar, dim=1)/float(n)
 
 
-class WeightedEnsemble:
+class WeightedLDAEnsemble:
     def __init__(self, c=0, k=0, device=torch.device("cpu")):
         """
         Trainable ensembling of classification posteriors.
@@ -43,10 +43,11 @@ class WeightedEnsemble:
         self.coefs_ = torch.zeros(k, k, c + 1).to(self.dev_)
         self.ldas_ = [[None for j in range(k)] for i in range(k)]
         self.pvals_ = None
+        self.trained_on_penultimate_ = None
 
     def fit(self, MP, tar, verbose=False, test_normality=False):
         """
-        Trains lda for every pair of classes
+        Trains lda on logits of pairwise probabilities for every pair of classes
         :param MP: c x n x k tensor of constituent classifiers outputs.
         c - number of constituent classifiers, n - number of training samples, k - number of classes
         :param tar: n tensor of sample labels
@@ -128,6 +129,88 @@ class WeightedEnsemble:
                 print("Number of classes with normality pval below 1% " + str(blw_1.item()))
 
         end = timer()
+        self.trained_on_penultimate_ = False
+        print("Fit finished in " + str(end - start) + " s")
+
+    def fit_penultimate(self, MP, tar, verbose=False, test_normality=False):
+        """
+        Trains lda on supports of penultimate layer for every pair of classes
+        :param MP: c x n x k tensor of constituent classifiers penultimate layer outputs.
+        c - number of constituent classifiers, n - number of training samples, k - number of classes
+        :param tar: n tensor of sample labels
+        :param verbose: print more detailed output
+        :param test_normality: test normality of lda predictors for each class in each class pair
+        :return:
+        """
+
+        print("Starting fit")
+        start = timer()
+        with torch.no_grad():
+            num = self.k_ * (self.k_ - 1) // 2      # Number of pairs of classes
+            if test_normality:
+                self.pvals_ = torch.zeros(num, 2, self.c_).to(torch.device("cpu"))
+            print_step = num // 100
+
+            pi = 0
+            for fc in range(self.k_):
+                for sc in range(fc + 1, self.k_):
+                    if print_step > 0 and pi % print_step == 0:
+                        print("Fit progress " + str(pi // print_step) + "%", end="\r")
+
+                    # c x n tensor containing True for samples belonging to classes fc, sc
+                    SamM = (tar == fc) + (tar == sc)
+                    # c x s x 1 tensor, where s is number of samples in classes fc and sc.
+                    # Tensor contains support of networks for class fc minus support for class sc
+                    SS = MP[:, SamM][:, :, fc] - MP[:, SamM][:, :, sc]
+
+                    # s x c tensor of logit supports of k networks for class fc against class sc for s samples
+                    X = SS.squeeze().transpose(0, 1)
+                    # Prepare targets
+                    y = tar[SamM]
+                    mask_fc = (y == fc)
+                    mask_sc = (y == sc)
+                    y[mask_fc] = 1
+                    y[mask_sc] = 0
+
+                    if test_normality:
+                        # Test normality of predictors
+                        #fc_pval = torch.tensor([normal_ad(X[mask_fc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
+                        #sc_pval = torch.tensor([normal_ad(X[mask_sc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
+                        fc_pval = torch.tensor(normaltest(X[mask_fc], 0)[1])
+                        sc_pval = torch.tensor(normaltest(X[mask_sc], 0)[1])
+                        self.pvals_[pi, 0, :] = fc_pval
+                        self.pvals_[pi, 1, :] = sc_pval
+                        if verbose:
+                            print("P-values of normality test for class " + str(fc))
+                            print(str(fc_pval))
+                            print("P-values of normality test for class " + str(sc))
+                            print(str(sc_pval))
+
+                    clf = LinearDiscriminantAnalysis(solver='lsqr')
+                    clf.fit(X, y)
+                    self.ldas_[fc][sc] = clf
+                    self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_).to(self.dev_).squeeze(),
+                                                        torch.tensor(clf.intercept_).to(self.dev_)))
+
+                    if verbose:
+                        pwacc = pairwise_accuracies(SS, y)
+                        print("Training pairwise accuracies for classes: " + str(fc) + ", " + str(sc) +
+                              "\n\tpairwise accuracies: " + str(pwacc) +
+                              "\n\tchosen coefficients: " + str(clf.coef_) +
+                              "\n\tintercept: " + str(clf.intercept_))
+
+                        print("\tcombined accuracy: " + str(clf.score(X, y)))
+
+                    pi += 1
+
+            if test_normality:
+                blw_5 = torch.sum(self.pvals_ < 0.05)
+                blw_1 = torch.sum(self.pvals_ < 0.01)
+                print("Number of classes with normality pval below 5% " + str(blw_5.item()))
+                print("Number of classes with normality pval below 1% " + str(blw_1.item()))
+
+        end = timer()
+        self.trained_on_penultimate_ = True
         print("Fit finished in " + str(end - start) + " s")
 
     def predict_proba(self, MP, PWComb):
@@ -139,26 +222,35 @@ class WeightedEnsemble:
         :return: n x k tensor of combined posteriors
         """
         print("Starting predict proba")
+        if self.trained_on_penultimate_ is None:
+            print("Ensemble not trained")
+            return
+
         start = timer()
         c, n, k = MP.size()
         assert c == self.c_
         assert k == self.k_
         p_probs = torch.Tensor(n, k, k)
 
-        num_non_one = torch.sum(torch.abs(torch.sum(MP, dim=2) - 1.0) > self.logit_eps_).item()
-        if num_non_one > 0:
-            print("Warning: " + str(num_non_one) +
-                  " samples with non unit sum of supports found, performing softmax")
-            MP = self.softmax_supports(MP)
+        if not self.trained_on_penultimate_:
+            num_non_one = torch.sum(torch.abs(torch.sum(MP, dim=2) - 1.0) > self.logit_eps_).item()
+            if num_non_one > 0:
+                print("Warning: " + str(num_non_one) +
+                      " samples with non unit sum of supports found, performing softmax")
+                MP = self.softmax_supports(MP)
 
         for fc in range(self.k_):
             for sc in range(fc + 1, self.k_):
-                # Obtains fc and sc probabilities for all classes
-                SS = MP[:, :, [fc, sc]].to(self.dev_)
-                # Computes p_ij pairwise probabilities for above mentioned samples
-                PWP = torch.true_divide(SS[:, :, 0], torch.sum(SS, 2) + (SS[:, :, 0] == 0))
-                LI = logit(PWP, self.logit_eps_)
-                X = LI.transpose(0, 1).cpu()
+                if not self.trained_on_penultimate_:
+                    # Obtains fc and sc probabilities for all classes
+                    SS = MP[:, :, [fc, sc]].to(self.dev_)
+                    # Computes p_ij pairwise probabilities for above mentioned samples
+                    PWP = torch.true_divide(SS[:, :, 0], torch.sum(SS, 2) + (SS[:, :, 0] == 0))
+                    LI = logit(PWP, self.logit_eps_)
+                    X = LI.transpose(0, 1).cpu()
+                else:
+                    SS = MP[:, :, fc] - MP[:, :, sc]
+                    X = SS.squeeze().transpose(0, 1)
                 PP = self.ldas_[fc][sc].predict_proba(X)
                 p_probs[:, sc, fc] = torch.from_numpy(PP[:, 0])
                 p_probs[:, fc, sc] = torch.from_numpy(PP[:, 1])
@@ -203,16 +295,20 @@ class WeightedEnsemble:
         :return: n x k tensor of combined posteriors
         """
         print("Starting predict proba topl")
+        if self.trained_on_penultimate_ is None:
+            print("Ensemble not trained")
+            return
         start = timer()
         c, n, k = MP.size()
         assert c == self.c_
         assert k == self.k_
 
-        num_non_one = torch.sum(torch.abs(torch.sum(MP, dim=2) - 1.0) > self.logit_eps_).item()
-        if num_non_one > 0:
-            print("Warning: " + str(num_non_one) +
-                  " samples with non unit sum of supports found, performing softmax")
-            MP = self.softmax_supports(MP)
+        if not self.trained_on_penultimate_:
+            num_non_one = torch.sum(torch.abs(torch.sum(MP, dim=2) - 1.0) > self.logit_eps_).item()
+            if num_non_one > 0:
+                print("Warning: " + str(num_non_one) +
+                      " samples with non unit sum of supports found, performing softmax")
+                MP = self.softmax_supports(MP)
 
         ps = torch.zeros(n, k).to(self.dev_)
         # Every sample may have different set of top classes, so we process them one by one
@@ -227,12 +323,16 @@ class WeightedEnsemble:
             p_probs = torch.zeros(1, tcc, tcc).to(self.dev_)
             for fci, fc in enumerate(Ti):
                 for sci, sc in enumerate(Ti[fci + 1:]):
-                    # Obtains fc and sc probabilities for current sample
-                    SS = MP[:, ni, [fc, sc]].to(self.dev_)
-                    # Computes p_ij pairwise probabilities for above mentioned samples
-                    PWP = torch.true_divide(SS[:, 0], torch.sum(SS, 1) + (SS[:, 0] == 0))
-                    LI = logit(PWP, self.logit_eps_)
-                    X = LI.T.unsqueeze(0).cpu()
+                    if not self.trained_on_penultimate_:
+                        # Obtains fc and sc probabilities for current sample
+                        SS = MP[:, ni, [fc, sc]].to(self.dev_)
+                        # Computes p_ij pairwise probabilities for above mentioned samples
+                        PWP = torch.true_divide(SS[:, 0], torch.sum(SS, 1) + (SS[:, 0] == 0))
+                        LI = logit(PWP, self.logit_eps_)
+                        X = LI.T.unsqueeze(0).cpu()
+                    else:
+                        SS = MP[:, ni, fc] - MP[:, ni, sc]
+                        X = SS.T.unsqueeze(0)
                     PP = self.ldas_[fc][sc].predict_proba(X)
                     p_probs[:, fci + 1 + sci, fci] = torch.from_numpy(PP[:, 0])
                     p_probs[:, fci, fci + 1 + sci] = torch.from_numpy(PP[:, 1])
@@ -257,60 +357,88 @@ class WeightedEnsemble:
         :return: n x k tensor of combined posteriors
         """
         print("Starting predict proba topl fast")
+        if self.trained_on_penultimate_ is None:
+            print("Ensemble not trained")
+            return
         start = timer()
         c, n, k = MP.size()
         assert c == self.c_
         assert k == self.k_
 
-        num_non_one = torch.sum(torch.abs(torch.sum(MP, dim=2) - 1.0) > self.logit_eps_).item()
-        if num_non_one > 0:
-            print("Warning: " + str(num_non_one) +
-                  " samples with non unit sum of supports found, performing softmax")
-            MP = self.softmax_supports(MP)
+        if not self.trained_on_penultimate_:
+            num_non_one = torch.sum(torch.abs(torch.sum(MP, dim=2) - 1.0) > self.logit_eps_).item()
+            if num_non_one > 0:
+                print("Warning: " + str(num_non_one) +
+                      " samples with non unit sum of supports found, performing softmax")
+                MP = self.softmax_supports(MP)
 
         MP = MP.to(self.dev_)
+        # ind is c x n x l tensor of top l indices for each sample in each network output
         val, ind = torch.topk(MP, l, dim=2)
         M = torch.zeros(MP.shape, dtype=torch.bool, device=self.dev_)
         # place true in positions of top probs
+        # c x n x k tensor
         M.scatter_(2, ind, True)
         # combine selections over c inputs
+        # n x k tensor containing for each sample a mask of union of top l classes from each constituent classifier
         M = torch.sum(M, dim=0, dtype=torch.bool)
         # zeroe lower values
+        # c x n x k tensor
         MPz = MP * M
+        # n x c x k tensor
         MPz.transpose_(0, 1)
         ps = torch.zeros(n, k, device=self.dev_)
         # Selected class counts for every n
         NPC = torch.sum(M, 1).squeeze()
+        # goes over possible numbers of classes in union of top l classes from each constituent classifier
         for pc in range(l, l * c + 1):
-            # Pick pc-class samples
+            # Pick those samples which have pc classes in the union
+            # pcn x c x k tensor
             pcMPz = MPz[NPC == pc]
             # Pick pc-class masks
+            # pcn x k tensor
             pcM = M[NPC == pc]
+            # Number of samples with pc classes in the union
             pcn = pcM.shape[0]
             if pcn == 0:
                 continue
 
+            # One dimensional tensors of row and column indices of elements in upper triangle of pc x pc matrix,
+            # ordered from left to right from top to bottom
             pcIMR = torch.tensor([], dtype=torch.long, device=self.dev_)
             pcIMC = torch.tensor([], dtype=torch.long, device=self.dev_)
             for r in range(pc):
                 pcIMR = torch.cat((pcIMR, torch.tensor([r], dtype=torch.long, device=self.dev_).repeat(pc - r - 1)))
                 pcIMC = torch.cat((pcIMC, torch.arange(r + 1, pc, device=self.dev_)))
 
-            # Indexes of picked values
+            # pcn x pc tensor containing for each of the pcn samples indices of classes belonging to the union
             pcMi = torch.nonzero(pcM, as_tuple=False)[:, 1].view(pcM.shape[0], pc)
-            # Just picked values
+            # Only the values for classes in the union
+            # pcn x c x pc tensor
             pcMPp = pcMPz.gather(2, pcMi.unsqueeze(1).expand(pcn, c, pc))
 
-            # For every pcn and c contains values of top right triangle of ps expanded as columns
+            # For every pcn and c contains values of top right triangle of matrix,
+            # formed from supports expanded over columns, from left to right, from top to bottom
+            # pcn x c x pc * (pc - 1) // 2 tensor
             pcMPpR = pcMPp[:, :, pcIMR]
-            # For every pcn and c contains values of top right triangle of ps expanded as rows
+            # For every pcn and c contains values of top right triangle of transposed matrix,
+            # formed from supports expanded over columns, from left to right, from top to bottom
+            # pcn x c x pc * (pc - 1) // 2 tensor
             pcMPpC = pcMPp[:, :, pcIMC]
-            # For every pcn and c contains top right triangle of pairwise probs p_ij
-            pcPWP = pcMPpR / (pcMPpR + pcMPpC)
+            if not self.trained_on_penultimate_:
+                # For every pcn and c contains top right triangle of pairwise probs p_ij
+                # pcn x c x pc * (pc - 1) // 2 tensor
+                pcPWP = pcMPpR / (pcMPpR + pcMPpC)
 
-            # logit pairwise probs
-            pcLI = logit(pcPWP, self.logit_eps_)
-            # Flattened logits in order of dimensions: pcn; kxk top right triangle by rows; c
+                # logit pairwise probs
+                # pcn x c x pc * (pc - 1) // 2 tensor
+                pcLI = logit(pcPWP, self.logit_eps_)
+            else:
+                # compute instead as a difference of supports
+                # pcn x c x pc * (pc - 1) // 2 tensor
+                pcLI = pcMPpR - pcMPpC
+
+            # Flattened logits in order of dimensions: pcn; pc x pc top right triangle by rows; c
             pcLIflat = pcLI.transpose(1, 2).flatten()
 
             # Number of values in top right triangle
@@ -361,7 +489,7 @@ class WeightedEnsemble:
 
         return ps
 
-    def save_models(self, file):
+    def save(self, file):
         """
         Save trained lda models into a file.
         :param file: file to save the models to
@@ -371,7 +499,7 @@ class WeightedEnsemble:
         with open(file, 'wb') as f:
             pickle.dump(self.ldas_, f)
 
-    def load_models(self, file):
+    def load(self, file):
         """
         Load trained lda models from a file
         :param file: file to load the models from

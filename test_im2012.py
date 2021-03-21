@@ -10,7 +10,7 @@ folder = "D:/skola/1/weighted_ensembles/tests_IM2012"
 
 train = "comb_train"
 test = "test"
-outputs_all = "combin_outputs"
+outputs_all = "combin_outputs_penultimate"
 output = "output"
 model = "model"
 targets = "targets.npy"
@@ -51,10 +51,10 @@ for sss in range(min_ens_size, num_nets + 1):
             order_fl_test.write('\n'.join(sub_set))
             order_fl_test.close()
 
-
             try:
                 test_folder(train_fold, test_fold, targets, order, outputs_fold, models_fold, [m1, m2, bc],
-                            combining_topl=topl, save_coefs=True, verbose=False, test_normality=True, save_pvals=True)
+                            combining_topl=topl, save_coefs=True, verbose=False, test_normality=True, save_pvals=True,
+                            fit_on_penultimate=True)
 
             finally:
                 os.remove(order_file)

@@ -1,5 +1,5 @@
 import torch
-from my_codes.weighted_ensembles.WeightedEnsemble import logit_sparse, logit
+from my_codes.weighted_ensembles.WeightedLDAEnsemble import logit_sparse, logit
 from my_codes.weighted_ensembles.SimplePWCombine import bc
 
 

@@ -2,7 +2,7 @@ import os
 import torch
 import numpy as np
 from my_codes.weighted_ensembles.predictions_evaluation import compute_acc_topk
-from my_codes.weighted_ensembles.WeightedEnsemble import WeightedEnsemble
+from my_codes.weighted_ensembles.WeightedLDAEnsemble import WeightedLDAEnsemble
 from my_codes.weighted_ensembles.SimplePWCombine import m1, m2, bc
 
 
@@ -31,12 +31,12 @@ def test_imagenet():
         acci = compute_acc_topk(tar.cuda(), tcs[nni].cuda(), 1)
         print("Accuracy of network " + str(names[inds_to_combine[nni]]) + ": " + str(acci))
 
-    WE = WeightedEnsemble(c, k)
+    WE = WeightedLDAEnsemble(c, k)
     #WE.fit(tcs, tar, False)
 
     #WE.save_models(models_file)
 
-    WE.load_models(models_file)
+    WE.load(models_file)
 
 
     with torch.no_grad():
