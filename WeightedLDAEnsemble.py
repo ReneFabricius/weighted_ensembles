@@ -41,7 +41,7 @@ class WeightedLDAEnsemble:
         self.c_ = c
         self.k_ = k
         self.coefs_ = torch.zeros(k, k, c + 1).to(self.dev_)
-        self.ldas_ = [[None for j in range(k)] for i in range(k)]
+        self.ldas_ = [[None for _ in range(k)] for _ in range(k)]
         self.pvals_ = None
         self.trained_on_penultimate_ = None
 
@@ -174,8 +174,8 @@ class WeightedLDAEnsemble:
 
                     if test_normality:
                         # Test normality of predictors
-                        #fc_pval = torch.tensor([normal_ad(X[mask_fc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
-                        #sc_pval = torch.tensor([normal_ad(X[mask_sc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
+                        # fc_pval = torch.tensor([normal_ad(X[mask_fc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
+                        # sc_pval = torch.tensor([normal_ad(X[mask_sc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
                         fc_pval = torch.tensor(normaltest(X[mask_fc], 0)[1])
                         sc_pval = torch.tensor(normaltest(X[mask_sc], 0)[1])
                         self.pvals_[pi, 0, :] = fc_pval
@@ -571,4 +571,3 @@ class WeightedLDAEnsemble:
             return torch.nn.Softmax(dim=2)(MP)
 
         return torch.nn.Softmax(dim=2)(MP.to(self.dev_)).cpu()
-

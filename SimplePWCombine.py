@@ -45,6 +45,8 @@ def bc(PP):
 
     MMi = (1/k)*(torch.eye(k - 1) + torch.ones(k - 1, k - 1)).cuda()
     rws = int(k * (k - 1) / 2)
+    # Mapping h is used such that elements of {1, ..., k(k-1)/2}
+    # are placed into upper triangle of k x k matrix row by row from left to right.
     M = torch.zeros(rws, k - 1)
     for c in range(k - 1):
         rs = int((c + 1) * k - (c + 1) * (c + 2) / 2)

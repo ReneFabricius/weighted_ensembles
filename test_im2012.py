@@ -10,13 +10,13 @@ folder = "D:/skola/1/weighted_ensembles/tests_IM2012"
 
 train = "comb_train"
 test = "test"
-outputs_all = "combin_outputs_penultimate"
+outputs_all = "experiments_batch_2/combin_outputs_penultimate"
 output = "output"
 model = "model"
 targets = "targets.npy"
 order = "order.txt"
-min_ens_size = 3
-topls = [5, 10, 15, 20]
+min_ens_size = 2
+topls = [5, 6, 7, 8, 9, 10]
 
 net_outputs = []
 for file in os.listdir(os.path.join(folder, train)):
