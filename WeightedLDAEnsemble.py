@@ -28,6 +28,12 @@ def pairwise_accuracies(SS, tar):
     return torch.sum(ti.cpu() != tar, dim=1)/float(n)
 
 
+def pairwise_accuracies_penultimate(SS, tar):
+    c, n = SS.size()
+    ti = SS > 0
+    return torch.sum(ti == tar, dim=1) / float(n)
+
+
 class WeightedLDAEnsemble:
     def __init__(self, c=0, k=0, device=torch.device("cpu")):
         """
@@ -176,8 +182,12 @@ class WeightedLDAEnsemble:
                         # Test normality of predictors
                         # fc_pval = torch.tensor([normal_ad(X[mask_fc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
                         # sc_pval = torch.tensor([normal_ad(X[mask_sc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
-                        fc_pval = torch.tensor(normaltest(X[mask_fc], 0)[1])
-                        sc_pval = torch.tensor(normaltest(X[mask_sc], 0)[1])
+                        if self.dev_.type == 'cpu':
+                            fc_pval = torch.tensor(normaltest(X[mask_fc], 0)[1])
+                            sc_pval = torch.tensor(normaltest(X[mask_sc], 0)[1])
+                        else:
+                            fc_pval = torch.tensor(normaltest(X[mask_fc].detach().cpu(), 0)[1])
+                            sc_pval = torch.tensor(normaltest(X[mask_sc].detach().cpu(), 0)[1])
                         self.pvals_[pi, 0, :] = fc_pval
                         self.pvals_[pi, 1, :] = sc_pval
                         if verbose:
@@ -187,19 +197,24 @@ class WeightedLDAEnsemble:
                             print(str(sc_pval))
 
                     clf = LinearDiscriminantAnalysis(solver='lsqr')
-                    clf.fit(X, y)
+                    if self.dev_.type == 'cpu':
+                        clf.fit(X, y)
+                    else:
+                        clf.fit(X.detach().cpu(), y.detach().cpu())
                     self.ldas_[fc][sc] = clf
                     self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_).to(self.dev_).squeeze(),
                                                         torch.tensor(clf.intercept_).to(self.dev_)))
 
                     if verbose:
-                        pwacc = pairwise_accuracies(SS, y)
+                        pwacc = pairwise_accuracies_penultimate(SS, y)
                         print("Training pairwise accuracies for classes: " + str(fc) + ", " + str(sc) +
                               "\n\tpairwise accuracies: " + str(pwacc) +
                               "\n\tchosen coefficients: " + str(clf.coef_) +
                               "\n\tintercept: " + str(clf.intercept_))
-
-                        print("\tcombined accuracy: " + str(clf.score(X, y)))
+                        if self.dev_.type == "cpu":
+                            print("\tcombined accuracy: " + str(clf.score(X, y)))
+                        else:
+                            print("\tcombined accuracy: " + str(clf.score(X.detach().cpu(), y.detach().cpu())))
 
                     pi += 1
 
@@ -251,7 +266,10 @@ class WeightedLDAEnsemble:
                 else:
                     SS = MP[:, :, fc] - MP[:, :, sc]
                     X = SS.squeeze().transpose(0, 1)
-                PP = self.ldas_[fc][sc].predict_proba(X)
+                if self.dev_.type == "cpu":
+                    PP = self.ldas_[fc][sc].predict_proba(X)
+                else:
+                    PP = self.ldas_[fc][sc].predict_proba(X.detach().cpu())
                 p_probs[:, sc, fc] = torch.from_numpy(PP[:, 0])
                 p_probs[:, fc, sc] = torch.from_numpy(PP[:, 1])
 
