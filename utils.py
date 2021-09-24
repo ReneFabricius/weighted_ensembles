@@ -3,11 +3,28 @@ from my_codes.weighted_ensembles.WeightedLDAEnsemble import logit_sparse, logit
 from my_codes.weighted_ensembles.SimplePWCombine import bc
 
 
-def gen_probs(c, n, k):
-    p = torch.randn(c, n, k).cuda()
+def gen_probs(c, n, k, device=torch.device("cuda")):
+    p = torch.randn(c, n, k, device=device)
     p = p - torch.min(p)
     p = p / torch.sum(p, 2).unsqueeze(2)
     return p
+
+
+def gen_probs_one_source(n, k, device=torch.device("cuda")):
+    p = torch.randn(n, k, device=device)
+    p = p - torch.min(p)
+    p = p / torch.sum(p, 1).unsqueeze(1)
+    return p
+
+
+def comp_R_one_source(p):
+    dev = p.device
+    n, k = p.shape
+    E = torch.eye(k, device=dev)
+    VE = (1 - E).unsqueeze(0).expand(n, k, k)
+    TCs = VE * p.unsqueeze(2)
+    R = TCs / (TCs + TCs.transpose(1, 2) + (TCs == 0))
+    return R
 
 
 def pwp(MP, l):
