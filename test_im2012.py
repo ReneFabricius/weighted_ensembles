@@ -4,13 +4,13 @@ import sys
 sys.path.append("D:/skola/1/weighted_ensembles")
 
 from my_codes.weighted_ensembles.general_test import test_folder
-from my_codes.weighted_ensembles.SimplePWCombine import m1, m2, bc
+from my_codes.weighted_ensembles.SimplePWCombine import m1, m2, bc, m2_iter
 
 folder = "D:/skola/1/weighted_ensembles/tests_IM2012"
 
 train = "comb_train"
 test = "test"
-outputs_all = "experiments_batch_2/combin_outputs_penultimate"
+outputs_all = "experiments_batch_3/combin_outputs_penultimate"
 output = "output"
 model = "model"
 targets = "targets.npy"
@@ -52,9 +52,9 @@ for sss in range(min_ens_size, num_nets + 1):
             order_fl_test.close()
 
             try:
-                test_folder(train_fold, test_fold, targets, order, outputs_fold, models_fold, [m1, m2, bc],
+                test_folder(train_fold, test_fold, targets, order, outputs_fold, models_fold, [m1, m2, m2_iter, bc],
                             combining_topl=topl, save_coefs=True, verbose=False, test_normality=True, save_pvals=True,
-                            fit_on_penultimate=True)
+                            fit_on_penultimate=True, double_precision=True)
 
             finally:
                 os.remove(order_file)

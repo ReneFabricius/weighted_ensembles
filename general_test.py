@@ -8,7 +8,7 @@ from my_codes.weighted_ensembles.WeightedLDAEnsemble import WeightedLDAEnsemble
 
 def test_folder(train_folder, test_folder, targets, order, output_folder, output_model_fold, comb_methods,
                 models_load_file=None, combining_topl=5, testing_topk=1, save_coefs=False, verbose=False,
-                test_normality=False, save_pvals=False, fit_on_penultimate=False):
+                test_normality=False, save_pvals=False, fit_on_penultimate=False, double_precision=False):
     """
     Trains a combiner on provided networks outputs - train_folder (or loads models if models_load_file is provided)
     and tests it on outputs in test_folder
@@ -36,10 +36,12 @@ def test_folder(train_folder, test_folder, targets, order, output_folder, output
     models_file = 'models'
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dtype = (torch.float64 if double_precision else torch.float32)
     print("Using device: " + str(device))
+    print("Using dtype: " + str(dtype))
 
     def process_file(n, fold):
-        M = torch.tensor(np.load(os.path.join(fold, n)), dtype=torch.float32)
+        M = torch.tensor(np.load(os.path.join(fold, n)), dtype=dtype)
         return M.unsqueeze(0)
 
     def check_inputs(fold, check_tar=True):
@@ -72,11 +74,11 @@ def test_folder(train_folder, test_folder, targets, order, output_folder, output
 
         # Compute accuracies of individual networks on training data
         for nni in range(c):
-            acci = compute_acc_topk(tar.cuda(), tcs[nni].cuda(), testing_topk)
+            acci = compute_acc_topk(tar.to(device=device, dtype=dtype), tcs[nni].to(device=device, dtype=dtype), testing_topk)
             print("Accuracy of train input (topk " + str(testing_topk) + ") " + str(npy_files_train[nni]) +
                   ": " + str(acci))
 
-        WE = WeightedLDAEnsemble(c=c, k=k, device=device)
+        WE = WeightedLDAEnsemble(c=c, k=k, device=device, dtp=dtype)
 
         if not fit_on_penultimate:
             WE.fit(tcs, tar, verbose, test_normality)
@@ -86,7 +88,7 @@ def test_folder(train_folder, test_folder, targets, order, output_folder, output
         if save_pvals:
             WE.save_pvals(os.path.join(output_folder, "p_values.npy"))
     else:
-        WE = WeightedLDAEnsemble(device=device)
+        WE = WeightedLDAEnsemble(device=device, dtp=dtype)
         WE.load(models_load_file)
         c = WE.c_
         k = WE.k_
@@ -110,7 +112,8 @@ def test_folder(train_folder, test_folder, targets, order, output_folder, output
 
         # Compute accuracies of individual networks on testing data
         for nni in range(c):
-            acci = compute_acc_topk(tar_test.cuda(), tcs_test[nni].cuda(), testing_topk)
+            acci = compute_acc_topk(tar_test.to(device=device, dtype=dtype),
+                                    tcs_test[nni].to(device=device, dtype=dtype), testing_topk)
             print("Accuracy of test input (topk " + str(testing_topk) + ") " + str(npy_files_test[nni]) + ": " + str(acci))
 
     with torch.no_grad():
@@ -123,7 +126,7 @@ def test_folder(train_folder, test_folder, targets, order, output_folder, output
 
             np.save(os.path.join(output_folder, "prob_" + cm.__name__), PPtl.cpu())
             if has_test_tar:
-                acc = compute_acc_topk(tar_test.cuda(), PPtl, testing_topk)
+                acc = compute_acc_topk(tar_test.to(device=device, dtype=dtype), PPtl, testing_topk)
                 print("Accuracy of model: " + str(acc))
 
     return 0
@@ -132,10 +135,12 @@ def test_folder(train_folder, test_folder, targets, order, output_folder, output
 def test_averaging_combination(test_folder, targets, order, output_folder, comb_methods,
                 combining_topl=5, testing_topk=1):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dtype = torch.float32
     print("Using device: " + str(device))
+    print("Using dtype: " + str(dtype))
 
     def process_file(n, fold):
-        M = torch.tensor(np.load(os.path.join(fold, n)), dtype=torch.float32)
+        M = torch.tensor(np.load(os.path.join(fold, n)), dtype=dtype)
         return M.unsqueeze(0)
 
     def check_inputs(fold, check_tar=True):
@@ -164,7 +169,7 @@ def test_averaging_combination(test_folder, targets, order, output_folder, comb_
     tcs_test = torch.cat(list(map(functools.partial(process_file, fold=test_folder), np.array(npy_files_test))), 0)
 
     c, n, k = tcs_test.size()
-    WE = WeightedLDAEnsemble(c=c, k=k, device=device)
+    WE = WeightedLDAEnsemble(c=c, k=k, device=device, dtp=dtype)
     WE.set_averaging_weights()
 
     has_test_tar = os.path.isfile(os.path.join(test_folder, targets))
@@ -173,7 +178,8 @@ def test_averaging_combination(test_folder, targets, order, output_folder, comb_
 
         # Compute accuracies of individual networks on testing data
         for nni in range(c):
-            acci = compute_acc_topk(tar_test.cuda(), tcs_test[nni].cuda(), testing_topk)
+            acci = compute_acc_topk(tar_test.to(device=device, dtype=dtype),
+                                    tcs_test[nni].to(device=device, dtype=dtype), testing_topk)
             print("Accuracy of test input (topk " + str(testing_topk) + ") " + str(npy_files_test[nni]) + ": " + str(
                 acci))
 
@@ -187,7 +193,7 @@ def test_averaging_combination(test_folder, targets, order, output_folder, comb_
 
             np.save(os.path.join(output_folder, "prob_" + cm.__name__), PPtl.cpu())
             if has_test_tar:
-                acc = compute_acc_topk(tar_test.cuda(), PPtl, testing_topk)
+                acc = compute_acc_topk(tar_test.to(device=device, dtype=dtype), PPtl, testing_topk)
                 print("Accuracy of model: " + str(acc))
 
     return 0

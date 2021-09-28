@@ -50,3 +50,11 @@ def compute_acc_topk(y_cor, ps, l):
     n = y_cor.size()[0]
 
     return torch.sum(top_i == y_cor.unsqueeze(1)).item() / n
+
+
+def compute_nll(y_cor, ps):
+    min_prob = (1e-16 if ps.dtype == torch.float64 else 1e-7)
+    thr = torch.nn.Threshold(min_prob, min_prob)
+    ps_thr = thr(ps)
+    nll = torch.nn.NLLLoss(reduction='sum')
+    return nll(ps_thr, y_cor)
