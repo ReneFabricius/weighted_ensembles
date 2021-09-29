@@ -56,5 +56,6 @@ def compute_nll(y_cor, ps):
     min_prob = (1e-16 if ps.dtype == torch.float64 else 1e-7)
     thr = torch.nn.Threshold(min_prob, min_prob)
     ps_thr = thr(ps)
+    ps_thr.log_()
     nll = torch.nn.NLLLoss(reduction='sum')
     return nll(ps_thr, y_cor)
