@@ -223,6 +223,73 @@ class WeightedLDAEnsemble:
         self.trained_on_penultimate_ = True
         print("Fit finished in " + str(end - start) + " s")
 
+    '''def fit_fast_penultimate(self, MP, tar, verbose=False):
+        """
+        Trains lda on supports of penultimate layer for every pair of classes
+        :param MP: c x n x k tensor of constituent classifiers penultimate layer outputs.
+        c - number of constituent classifiers, n - number of training samples, k - number of classes
+        :param tar: n tensor of sample labels
+        :param verbose: print more detailed output
+        :param test_normality: test normality of lda predictors for each class in each class pair
+        :return:
+        """
+
+        print("Starting fit fast")
+        start = timer()
+        with torch.no_grad():
+            tar = tar.to(device=self.dev_, dtype=self.dtp_)
+            MP = MP.to(device=self.dev_, dtype=self.dtp_)
+            class_counts = torch.bincount(tar)
+            priors = class_counts / torch.sum(class_counts)
+
+
+
+
+            pi = 0
+            for fc in range(self.k_):
+                for sc in range(fc + 1, self.k_):
+                    if print_step > 0 and pi % print_step == 0:
+                        print("Fit progress " + str(pi // print_step) + "%", end="\r")
+
+                    # c x n tensor containing True for samples belonging to classes fc, sc
+                    SamM = (tar == fc) + (tar == sc)
+                    # c x s x 1 tensor, where s is number of samples in classes fc and sc.
+                    # Tensor contains support of networks for class fc minus support for class sc
+                    SS = MP[:, SamM][:, :, fc] - MP[:, SamM][:, :, sc]
+
+                    # s x c tensor of logit supports of k networks for class fc against class sc for s samples
+                    X = SS.squeeze().transpose(0, 1)
+                    # Prepare targets
+                    y = tar[SamM]
+                    mask_fc = (y == fc)
+                    mask_sc = (y == sc)
+                    y[mask_fc] = 1
+                    y[mask_sc] = 0
+
+                    clf = LinearDiscriminantAnalysis(solver='lsqr')
+                    clf.fit(X.detach().cpu(), y.detach().cpu())
+                    self.ldas_[fc][sc] = clf
+                    self.coefs_[fc, sc, :] = torch.cat(
+                        (torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
+                         torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
+
+                    if verbose:
+                        pwacc = pairwise_accuracies_penultimate(SS, y)
+                        print("Training pairwise accuracies for classes: " + str(fc) + ", " + str(sc) +
+                              "\n\tpairwise accuracies: " + str(pwacc) +
+                              "\n\tchosen coefficients: " + str(clf.coef_) +
+                              "\n\tintercept: " + str(clf.intercept_))
+                        if self.dev_.type == "cpu":
+                            print("\tcombined accuracy: " + str(clf.score(X, y)))
+                        else:
+                            print("\tcombined accuracy: " + str(clf.score(X.detach().cpu(), y.detach().cpu())))
+
+                    pi += 1
+
+        end = timer()
+        self.trained_on_penultimate_ = True
+        print("Fit finished in " + str(end - start) + " s")'''
+
     def predict_proba(self, MP, PWComb):
         """
         Combines outputs of constituent classifiers using all classes.

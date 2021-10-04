@@ -4,11 +4,14 @@ import numpy as np
 import os
 
 
-def m1(PP):
+def m1(PP, verbose=False):
     device = PP.device
     dtype = PP.dtype
     n, k, kk = PP.size()
     assert k == kk
+    if verbose:
+        print("Working with {} samples, each with {} classes".format(n, k))
+        print("Solving for pairwise probabilities {}".format(PP))
 
     E = torch.eye(k, device=device, dtype=dtype)
     Es = E.unsqueeze(0).expand(n, k, k)
@@ -18,8 +21,15 @@ def m1(PP):
     A = (PP.sum(dim=2).diag_embed() + PP) / (k - 1) - Es
     A[:, k - 1, :] = 1
 
+    if verbose:
+        print("Solving linear system {} × x = {}".format(B, A))
+
     Xs, LUs = torch.solve(B, A)
     ps = Xs[:, 0:k, 0:1].squeeze(2)
+
+    if verbose:
+        print("Resulting probabilities {}".format(ps))
+
     return ps
 
 
