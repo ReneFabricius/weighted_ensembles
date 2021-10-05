@@ -11,7 +11,7 @@ def m1(PP, verbose=False):
     assert k == kk
     if verbose:
         print("Working with {} samples, each with {} classes".format(n, k))
-        print("Solving for pairwise probabilities {}".format(PP))
+        print("Solving for pairwise probabilities\n{}".format(PP.cpu().numpy()))
 
     E = torch.eye(k, device=device, dtype=dtype)
     Es = E.unsqueeze(0).expand(n, k, k)
@@ -22,18 +22,18 @@ def m1(PP, verbose=False):
     A[:, k - 1, :] = 1
 
     if verbose:
-        print("Solving linear system {} × x = {}".format(B, A))
+        print("Solving linear system\n{}\n× x =\n{}".format(A.cpu().numpy(), B.cpu().numpy()))
 
     Xs, LUs = torch.solve(B, A)
     ps = Xs[:, 0:k, 0:1].squeeze(2)
 
     if verbose:
-        print("Resulting probabilities {}".format(ps))
+        print("Resulting probabilities\n{}".format(ps.cpu().numpy()))
 
     return ps
 
 
-def m2(PP):
+def m2(PP, verbose=False):
     device = PP.device
     dtype = PP.dtype
     n, k, kk = PP.size()
@@ -49,10 +49,11 @@ def m2(PP):
     A = torch.cat((A, torch.cat((es.transpose(1, 2), zs), 2)), 1)
     Xs, LUs = torch.solve(B, A)
     ps = Xs[:, 0:k, 0:1].squeeze(2)
+
     return ps
 
 
-def m2_iter(PP):
+def m2_iter(PP, verbose=False):
     device = PP.device
     dtype = PP.dtype
     n, k, kk = PP.size()
@@ -63,7 +64,6 @@ def m2_iter(PP):
     not_diag = torch.logical_xor(torch.ones(k, k, dtype=torch.bool, device=device),
                                  torch.eye(k, dtype=torch.bool, device=device))
 
-    PP = PP.to(device=device, dtype=dtype)
     PP[(PP < min_prob) & not_diag] = min_prob
     PP[(PP > (1 - min_prob)) & not_diag] = 1 - min_prob
 
@@ -89,7 +89,7 @@ def m2_iter(PP):
     return p.squeeze(2)
 
 
-def bc(PP):
+def bc(PP, verbose=False):
     device = PP.device
     dtype = PP.dtype
     n, k, kk = PP.size()
@@ -112,7 +112,6 @@ def bc(PP):
             oi -= 1
             cs += k - (c - oi)
 
-    M = M.cuda()
     MMiM = torch.matmul(MMi, M.T)
 
     rv = PP[:, torch.triu(torch.ones(k, k, device=device, dtype=dtype), 1) == 1].T

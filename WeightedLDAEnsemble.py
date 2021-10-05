@@ -290,7 +290,7 @@ class WeightedLDAEnsemble:
         self.trained_on_penultimate_ = True
         print("Fit finished in " + str(end - start) + " s")'''
 
-    def predict_proba(self, MP, PWComb):
+    def predict_proba(self, MP, PWComb, debug_pwcm=False):
         """
         Combines outputs of constituent classifiers using all classes.
         :param MP: c x n x k tensor of constituent classifiers posteriors
@@ -298,7 +298,7 @@ class WeightedLDAEnsemble:
         :param PWComb: coupling method to use
         :return: n x k tensor of combined posteriors
         """
-        print("Starting predict proba")
+        print("Starting predict proba, pwc method {}".format(PWComb.__name__))
         if self.trained_on_penultimate_ is None:
             print("Ensemble not trained")
             return
@@ -327,7 +327,9 @@ class WeightedLDAEnsemble:
                     X = LI.transpose(0, 1).cpu()
                 else:
                     SS = MP[:, :, fc] - MP[:, :, sc]
-                    X = SS.squeeze().transpose(0, 1)
+                    if SS.dim() == 3:
+                        SS = SS.squeeze()
+                    X = SS.transpose(0, 1)
 
                 PP = self.ldas_[fc][sc].predict_proba(X.detach().cpu())
                 p_probs[:, sc, fc] = torch.from_numpy(PP[:, 0])
@@ -336,7 +338,7 @@ class WeightedLDAEnsemble:
         end = timer()
         print("Predict proba finished in " + str(end - start) + " s")
 
-        return PWComb(p_probs.to(device=self.dev_, dtype=self.dtp_))
+        return PWComb(p_probs.to(device=self.dev_, dtype=self.dtp_), verbose=debug_pwcm)
 
     def test_pairwise(self, MP, tar):
         for fc in range(self.k_):
