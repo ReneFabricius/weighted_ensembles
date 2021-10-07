@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import functools
 from weighted_ensembles.predictions_evaluation import compute_acc_topk
-from weighted_ensembles import WeightedLDAEnsemble
+from weighted_ensembles.WeightedLDAEnsemble import WeightedLDAEnsemble
 
 
 def ensemble_general_test(data_train_path, data_test_path, targets, order, output_folder, output_model_fold, comb_methods,

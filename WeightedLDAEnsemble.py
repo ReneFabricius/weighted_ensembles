@@ -6,7 +6,7 @@ import pandas as pd
 from scipy.stats import normaltest
 from timeit import default_timer as timer
 
-from utils import logit, pairwise_accuracies, pairwise_accuracies_penultimate
+from weighted_ensembles.utils import logit, pairwise_accuracies, pairwise_accuracies_penultimate
 
 
 class WeightedLDAEnsemble:
