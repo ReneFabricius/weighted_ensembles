@@ -6,18 +6,18 @@ from weighted_ensembles.predictions_evaluation import compute_acc_topk
 from weighted_ensembles import WeightedLDAEnsemble
 
 
-def test_folder(train_folder, test_folder, targets, order, output_folder, output_model_fold, comb_methods,
-                models_load_file=None, combining_topl=5, testing_topk=1, save_coefs=False, verbose=False,
-                test_normality=False, save_pvals=False, fit_on_penultimate=False, double_precision=False):
+def ensemble_general_test(data_train_path, data_test_path, targets, order, output_folder, output_model_fold, comb_methods,
+                          models_load_file=None, combining_topl=5, testing_topk=1, save_coefs=False, verbose=False,
+                          test_normality=False, save_pvals=False, fit_on_penultimate=False, double_precision=False):
     """
-    Trains a combiner on provided networks outputs - train_folder (or loads models if models_load_file is provided)
-    and tests it on outputs in test_folder
+    Trains a combiner on provided networks outputs - data_train_path (or loads models if models_load_file is provided)
+    and tests it on outputs in data_test_path
 
     :param save_pvals:
     :param test_normality:
-    :param train_folder: folder containing outputs of networks for training the combiner,
+    :param data_train_path: folder containing outputs of networks for training the combiner,
     respective targets and order file
-    :param test_folder: folder containing outputs of networks for testing the combiner,
+    :param data_test_path: folder containing outputs of networks for testing the combiner,
     alternatively also testing targets
     :param targets: name of targets file
     :param order: text folder containing names of networks' output files to be combined
@@ -60,13 +60,13 @@ def test_folder(train_folder, test_folder, targets, order, output_folder, output
         return inp_files
 
     if models_load_file is None:
-        print("Training from folder: " + train_folder)
-        npy_files_train = check_inputs(train_folder)
+        print("Training from folder: " + data_train_path)
+        npy_files_train = check_inputs(data_train_path)
 
         # Load networks' training outputs
-        tcs = torch.cat(list(map(functools.partial(process_file, fold=train_folder), np.array(npy_files_train))), 0)
+        tcs = torch.cat(list(map(functools.partial(process_file, fold=data_train_path), np.array(npy_files_train))), 0)
         # Load training targets
-        tar = torch.tensor(np.load(os.path.join(train_folder, targets)))
+        tar = torch.tensor(np.load(os.path.join(data_train_path, targets)))
         # c-number of networks, n-number of classified instances, k-number of classes
         c, n, k = tcs.size()
 
@@ -100,15 +100,15 @@ def test_folder(train_folder, test_folder, targets, order, output_folder, output
 
     # Testing
     # Check existence of files
-    print("Testing from folder: " + test_folder)
-    npy_files_test = check_inputs(test_folder, check_tar=False)
+    print("Testing from folder: " + data_test_path)
+    npy_files_test = check_inputs(data_test_path, check_tar=False)
 
     # Load networks' testing outputs
-    tcs_test = torch.cat(list(map(functools.partial(process_file, fold=test_folder), np.array(npy_files_test))), 0)
+    tcs_test = torch.cat(list(map(functools.partial(process_file, fold=data_test_path), np.array(npy_files_test))), 0)
 
-    has_test_tar = os.path.isfile(os.path.join(test_folder, targets))
+    has_test_tar = os.path.isfile(os.path.join(data_test_path, targets))
     if has_test_tar:
-        tar_test = torch.tensor(np.load(os.path.join(test_folder, targets)))
+        tar_test = torch.tensor(np.load(os.path.join(data_test_path, targets)))
 
         # Compute accuracies of individual networks on testing data
         for nni in range(c):
@@ -132,8 +132,22 @@ def test_folder(train_folder, test_folder, targets, order, output_folder, output
     return 0
 
 
-def test_averaging_combination(test_folder, targets, order, output_folder, comb_methods,
-                combining_topl=5, testing_topk=1):
+def test_averaging_combination(data_test_path, targets, order, output_folder, comb_methods,
+                               combining_topl=5, testing_topk=1):
+    """
+    Tests simple averaging ensemble on provided test outputs in folder data_test_path.
+
+    :param data_test_path: folder containing outputs of networks for testing the combiner,
+    alternatively also testing targets
+    :param targets: name of targets file
+    :param order: text folder containing names of networks' output files to be combined
+    :param output_folder: folder into which ensemble outputs will be saved
+    :param comb_methods: list of combining methods to test
+    :param combining_topl: number of top classes for each network which will be combined,
+    enter zero to combine all classes
+    :param testing_topk: number of top classes which will be considered in accuracy computation
+    :return:
+    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.float32
     print("Using device: " + str(device))
@@ -162,19 +176,19 @@ def test_averaging_combination(test_folder, targets, order, output_folder, comb_
 
     # Testing
     # Check existence of files
-    print("Testing from folder: " + test_folder)
-    npy_files_test = check_inputs(test_folder, check_tar=False)
+    print("Testing from folder: " + data_test_path)
+    npy_files_test = check_inputs(data_test_path, check_tar=False)
 
     # Load networks' testing outputs
-    tcs_test = torch.cat(list(map(functools.partial(process_file, fold=test_folder), np.array(npy_files_test))), 0)
+    tcs_test = torch.cat(list(map(functools.partial(process_file, fold=data_test_path), np.array(npy_files_test))), 0)
 
     c, n, k = tcs_test.size()
     WE = WeightedLDAEnsemble(c=c, k=k, device=device, dtp=dtype)
     WE.set_averaging_weights()
 
-    has_test_tar = os.path.isfile(os.path.join(test_folder, targets))
+    has_test_tar = os.path.isfile(os.path.join(data_test_path, targets))
     if has_test_tar:
-        tar_test = torch.tensor(np.load(os.path.join(test_folder, targets)))
+        tar_test = torch.tensor(np.load(os.path.join(data_test_path, targets)))
 
         # Compute accuracies of individual networks on testing data
         for nni in range(c):
