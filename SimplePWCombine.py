@@ -1,10 +1,16 @@
 import torch
 from timeit import default_timer as timer
-import numpy as np
-import os
 
 
 def m1(PP, verbose=False):
+    """
+    Method one of Wu, Lin and Weng.
+
+    :param PP: n×k×k tensor of matrices of pairwise probabilities
+    :param verbose: print detailed output
+    :return: n×k tensor of probability vectors
+    """
+    start = timer()
     device = PP.device
     dtype = PP.dtype
     n, k, kk = PP.size()
@@ -30,10 +36,21 @@ def m1(PP, verbose=False):
     if verbose:
         print("Resulting probabilities\n{}".format(ps.cpu().numpy()))
 
+    end = timer()
+    print("Method m1 finished in {:.4f} s".format(end - start))
+
     return ps
 
 
 def m2(PP, verbose=False):
+    """
+    Method two of Wu, Lin and Weng.
+
+    :param PP: n×k×k tensor of matrices of pairwise probabilities
+    :param verbose: print detailed output
+    :return: n×k tensor of probability vectors
+    """
+    start = timer()
     device = PP.device
     dtype = PP.dtype
     n, k, kk = PP.size()
@@ -45,15 +62,36 @@ def m2(PP, verbose=False):
     B[:, k, :] = 1
 
     Q = (PP * PP).sum(dim=1).diag_embed() - PP * PP.transpose(1, 2)
+    if verbose:
+        print("Matrix Q:\n{}".format(Q.cpu().numpy()))
+
     A = torch.cat((Q, es), 2)
     A = torch.cat((A, torch.cat((es.transpose(1, 2), zs), 2)), 1)
+
+    if verbose:
+        print("Solving linear system\n{}\n× x =\n{}".format(A.cpu().numpy(), B.cpu().numpy()))
+
     Xs, LUs = torch.solve(B, A)
     ps = Xs[:, 0:k, 0:1].squeeze(2)
+
+    if verbose:
+        print("Resulting probabilities\n{}".format(ps.cpu().numpy()))
+
+    end = timer()
+    print("Method m2 finished in {:.4f} s".format(end - start))
 
     return ps
 
 
 def m2_iter(PP, verbose=False):
+    """
+    Method two, iterative implementation of Wu, Lin and Weng.
+
+    :param PP: n×k×k tensor of matrices of pairwise probabilities
+    :param verbose: print detailed output
+    :return: n×k tensor of probability vectors
+    """
+    start = timer()
     device = PP.device
     dtype = PP.dtype
     n, k, kk = PP.size()
@@ -68,6 +106,10 @@ def m2_iter(PP, verbose=False):
     PP[(PP > (1 - min_prob)) & not_diag] = 1 - min_prob
 
     Q = (PP * PP).sum(dim=1).diag_embed() - PP * PP.transpose(1, 2)
+
+    if verbose:
+        print("Matrix Q:\n{}".format(Q.cpu().numpy()))
+
     p = torch.ones(n, k, 1, device=device, dtype=dtype) / k
 
     for it in range(max_iter):
@@ -75,8 +117,16 @@ def m2_iter(PP, verbose=False):
         pQp = torch.matmul(p.transpose(1, 2), Qp)
 
         max_err = torch.max(torch.abs(Qp - pQp)).item()
+
+        if verbose:
+            print("Iteration {}".format(it))
+            print("Probability vector:\n{}".format(p.cpu().numpy()))
+            print("Qp:\n{}\npQp: {}".format(Qp.cpu().numpy(), pQp.cpu().numpy()))
+            print("Maximum error: {}".format(max_err))
+
         if max_err < eps:
-            # print("Exiting in iteration {}".format(it))
+            if verbose:
+                print("Exiting in iteration {}".format(it))
             break
 
         for t in range(k):
@@ -86,10 +136,21 @@ def m2_iter(PP, verbose=False):
             Qp = (Qp + diff * Q[:, :, [t]]) / (1 + diff)
             p = p / (1 + diff)
 
+    end = timer()
+    print("Method m2_iter finished in {:.4f} s".format(end - start))
+
     return p.squeeze(2)
 
 
 def bc(PP, verbose=False):
+    """
+    Bayes covariant method of Such and Barreda.
+
+    :param PP: n×k×k tensor of matrices of pairwise probabilities
+    :param verbose: print detailed output
+    :return: n×k tensor of probability vectors
+    """
+    start = timer()
     device = PP.device
     dtype = PP.dtype
     n, k, kk = PP.size()
@@ -114,14 +175,24 @@ def bc(PP, verbose=False):
 
     MMiM = torch.matmul(MMi, M.T)
 
+    if verbose:
+        print("Matrix MMiM:\n{}".format(MMiM.cpu().numpy()))
+
     rv = PP[:, torch.triu(torch.ones(k, k, device=device, dtype=dtype), 1) == 1].T
     small = eps*torch.ones(rv.size(), device=device, dtype=dtype)
     rv = torch.where(rv < eps, small, rv)
     rv = torch.where(rv > 1 - eps, 1 - small, rv)
     s = torch.log(1 / rv - 1)
     u = torch.matmul(MMiM, s)
+
+    if verbose:
+        print("Vector s:\n{}\nVector u:\n{}".format(s.cpu().numpy(), u.cpu().numpy()))
+
     zs = torch.zeros(1, n, device=device, dtype=dtype)
     u_exp = torch.exp(torch.cat([zs, u], dim=0))
     ps = u_exp / torch.sum(u_exp, dim=0)
+
+    end = timer()
+    print("Method bc finished in {:.4f} s".format(end - start))
 
     return ps.T

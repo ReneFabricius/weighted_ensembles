@@ -4,34 +4,9 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 import pickle
 import pandas as pd
 from scipy.stats import normaltest
-
 from timeit import default_timer as timer
 
-
-def logit(T, eps):
-    EPS = T.new_full(T.shape, eps, device=T.device, dtype=T.dtype)
-    L = torch.where(T < eps, EPS, T)
-    LU = torch.where(L > 1 - eps, 1 - EPS, L)
-    return torch.log(LU/(1 - LU))
-
-
-def logit_sparse(T, eps):
-    Vli = logit(T.values(), eps)
-    return torch.sparse_coo_tensor(T.indices(), Vli, T.shape)
-
-
-def pairwise_accuracies(SS, tar):
-    c, n, k = SS.size()
-    top_v, top_i = torch.topk(SS, 1, dim=2)
-    ti = top_i.squeeze(dim=2)
-    # Coding of target is switched. 1 for class on index 0 and 0 for class on index 1
-    return torch.sum(ti.cpu() != tar, dim=1)/float(n)
-
-
-def pairwise_accuracies_penultimate(SS, tar):
-    c, n = SS.size()
-    ti = SS > 0
-    return torch.sum(ti == tar, dim=1) / float(n)
+from utils import logit, pairwise_accuracies, pairwise_accuracies_penultimate
 
 
 class WeightedLDAEnsemble:

@@ -2,8 +2,8 @@ import os
 import torch
 import numpy as np
 import functools
-from my_codes.weighted_ensembles.predictions_evaluation import compute_acc_topk
-from my_codes.weighted_ensembles.WeightedLDAEnsemble import WeightedLDAEnsemble
+from weighted_ensembles.predictions_evaluation import compute_acc_topk
+from weighted_ensembles import WeightedLDAEnsemble
 
 
 def test_folder(train_folder, test_folder, targets, order, output_folder, output_model_fold, comb_methods,

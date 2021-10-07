@@ -1,8 +1,14 @@
 import torch
-from my_codes.weighted_ensembles.WeightedLDAEnsemble import pairwise_accuracies, logit
 
 
 def compute_pairwise_accuracies(MP, tar):
+    """
+    Computes pairwise accuracies of multiclass classifier
+
+    :param MP: multiclass classifier outputs
+    :param tar: correct labels
+    :return: vector of pairwise accuracies
+    """
     n, k = MP.size()
     pw_acc = torch.zeros((k*(k-1))//2)
     pi = 0
