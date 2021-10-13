@@ -33,7 +33,7 @@ def gen_probs_one_source(n, k, device=torch.device("cuda"), dtype=torch.float32)
     return p
 
 
-def comp_R_one_source(p):
+def comp_R(p):
     """
     Computes matrices of pairwise probabilities from classifier predictions
     :param p: classifier predictions
@@ -41,11 +41,18 @@ def comp_R_one_source(p):
     """
     dev = p.device
     dtp = p.dtype
-    n, k = p.shape
-    E = torch.eye(k, device=dev, dtype=dtp)
-    VE = (1 - E).unsqueeze(0).expand(n, k, k)
-    TCs = VE * p.unsqueeze(2)
-    R = TCs / (TCs + TCs.transpose(1, 2) + (TCs == 0))
+    if len(p.shape) == 2:
+        n, k = p.shape
+        E = torch.eye(k, device=dev, dtype=dtp)
+        VE = (1 - E).unsqueeze(0).expand(n, k, k)
+        TCs = VE * p.unsqueeze(2)
+    else:
+        c, n, k = p.shape
+        E = torch.eye(k, device=dev, dtype=dtp)
+        VE = (1 - E).unsqueeze(0).unsqueeze(1).expand(c, n, k, k)
+        TCs = VE * p.unsqueeze(3)
+
+    R = TCs / (TCs + TCs.transpose(-1, -2) + (TCs == 0))
     return R
 
 
