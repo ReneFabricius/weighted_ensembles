@@ -400,7 +400,7 @@ class WeightedLDAEnsemble:
 
         return ps
 
-    def predict_proba_topl_fast(self, MP, l, PWComb):
+    def predict_proba_topl_fast(self, MP, l, PWComb, batch_size=None):
         """
         Better optimized version of predict_proba_topl
         Combines outputs of constituent classifiers using only those classes, which are among the top l most probable
@@ -409,6 +409,7 @@ class WeightedLDAEnsemble:
         c - number of constituent classifiers, n - number of training samples, k - number of classes
         :param l: how many most probable classes for each constituent classifier to consider
         :param PWComb: coupling method to use
+        :param batch_size: if not none, the size of the batches to use
         :return: n x k tensor of combined posteriors
         """
         print("Starting predict proba topl fast")
@@ -427,122 +428,131 @@ class WeightedLDAEnsemble:
                       " samples with non unit sum of supports found, performing softmax")
                 MP = self.softmax_supports(MP)
 
-        MP = MP.to(device=self.dev_, dtype=self.dtp_)
-        # ind is c x n x l tensor of top l indices for each sample in each network output
-        val, ind = torch.topk(MP, l, dim=2)
-        M = torch.zeros(MP.shape, dtype=torch.bool, device=self.dev_)
-        # place true in positions of top probs
-        # c x n x k tensor
-        M.scatter_(2, ind, True)
-        # combine selections over c inputs
-        # n x k tensor containing for each sample a mask of union of top l classes from each constituent classifier
-        M = torch.sum(M, dim=0, dtype=torch.bool)
-        # zeroe lower values
-        # c x n x k tensor
-        MPz = MP * M
-        # n x c x k tensor
-        MPz.transpose_(0, 1)
-        ps = torch.zeros(n, k, device=self.dev_, dtype=self.dtp_)
-        # Selected class counts for every n
-        NPC = torch.sum(M, 1).squeeze()
-        # goes over possible numbers of classes in union of top l classes from each constituent classifier
-        for pc in range(l, l * c + 1):
-            # Pick those samples which have pc classes in the union
-            # pcn x c x k tensor
-            pcMPz = MPz[NPC == pc]
-            # Pick pc-class masks
-            # pcn x k tensor
-            pcM = M[NPC == pc]
-            # Number of samples with pc classes in the union
-            pcn = pcM.shape[0]
-            if pcn == 0:
-                continue
+        b_size = batch_size if batch_size is not None else n
+        ps_list = []
 
-            # One dimensional tensors of row and column indices of elements in upper triangle of pc x pc matrix,
-            # ordered from left to right from top to bottom
-            pcIMR = torch.tensor([], dtype=torch.long, device=self.dev_)
-            pcIMC = torch.tensor([], dtype=torch.long, device=self.dev_)
-            for r in range(pc):
-                pcIMR = torch.cat((pcIMR, torch.tensor([r], dtype=torch.long, device=self.dev_).repeat(pc - r - 1)))
-                pcIMC = torch.cat((pcIMC, torch.arange(r + 1, pc, device=self.dev_)))
+        for start_ind in range(0, n, b_size):
+            curMP = MP[:, start_ind:(start_ind + b_size), :].to(device=self.dev_, dtype=self.dtp_)
+            curn = curMP.shape[1]
 
-            # pcn x pc tensor containing for each of the pcn samples indices of classes belonging to the union
-            pcMi = torch.nonzero(pcM, as_tuple=False)[:, 1].view(pcM.shape[0], pc)
-            # Only the values for classes in the union
-            # pcn x c x pc tensor
-            pcMPp = pcMPz.gather(2, pcMi.unsqueeze(1).expand(pcn, c, pc))
+            # ind is c x n x l tensor of top l indices for each sample in each network output
+            val, ind = torch.topk(curMP, l, dim=2)
+            M = torch.zeros(curMP.shape, dtype=torch.bool, device=self.dev_)
+            # place true in positions of top probs
+            # c x n x k tensor
+            M.scatter_(2, ind, True)
+            # combine selections over c inputs
+            # n x k tensor containing for each sample a mask of union of top l classes from each constituent classifier
+            M = torch.sum(M, dim=0, dtype=torch.bool)
+            # zeroe lower values
+            # c x n x k tensor
+            MPz = curMP * M
+            # n x c x k tensor
+            MPz.transpose_(0, 1)
+            ps = torch.zeros(curn, k, device=self.dev_, dtype=self.dtp_)
+            # Selected class counts for every n
+            NPC = torch.sum(M, 1).squeeze()
+            # goes over possible numbers of classes in union of top l classes from each constituent classifier
+            for pc in range(l, l * c + 1):
+                # Pick those samples which have pc classes in the union
+                # pcn x c x k tensor
+                pcMPz = MPz[NPC == pc]
+                # Pick pc-class masks
+                # pcn x k tensor
+                pcM = M[NPC == pc]
+                # Number of samples with pc classes in the union
+                pcn = pcM.shape[0]
+                if pcn == 0:
+                    continue
 
-            # For every pcn and c contains values of top right triangle of matrix,
-            # formed from supports expanded over columns, from left to right, from top to bottom
-            # pcn x c x pc * (pc - 1) // 2 tensor
-            pcMPpR = pcMPp[:, :, pcIMR]
-            # For every pcn and c contains values of top right triangle of transposed matrix,
-            # formed from supports expanded over columns, from left to right, from top to bottom
-            # pcn x c x pc * (pc - 1) // 2 tensor
-            pcMPpC = pcMPp[:, :, pcIMC]
-            if not self.trained_on_penultimate_:
-                # For every pcn and c contains top right triangle of pairwise probs p_ij
+                # One dimensional tensors of row and column indices of elements in upper triangle of pc x pc matrix,
+                # ordered from left to right from top to bottom
+                pcIMR = torch.tensor([], dtype=torch.long, device=self.dev_)
+                pcIMC = torch.tensor([], dtype=torch.long, device=self.dev_)
+                for r in range(pc):
+                    pcIMR = torch.cat((pcIMR, torch.tensor([r], dtype=torch.long, device=self.dev_).repeat(pc - r - 1)))
+                    pcIMC = torch.cat((pcIMC, torch.arange(r + 1, pc, device=self.dev_)))
+
+                # pcn x pc tensor containing for each of the pcn samples indices of classes belonging to the union
+                pcMi = torch.nonzero(pcM, as_tuple=False)[:, 1].view(pcM.shape[0], pc)
+                # Only the values for classes in the union
+                # pcn x c x pc tensor
+                pcMPp = pcMPz.gather(2, pcMi.unsqueeze(1).expand(pcn, c, pc))
+
+                # For every pcn and c contains values of top right triangle of matrix,
+                # formed from supports expanded over columns, from left to right, from top to bottom
                 # pcn x c x pc * (pc - 1) // 2 tensor
-                pcPWP = pcMPpR / (pcMPpR + pcMPpC)
-
-                # logit pairwise probs
+                pcMPpR = pcMPp[:, :, pcIMR]
+                # For every pcn and c contains values of top right triangle of transposed matrix,
+                # formed from supports expanded over columns, from left to right, from top to bottom
                 # pcn x c x pc * (pc - 1) // 2 tensor
-                pcLI = logit(pcPWP, self.logit_eps_)
-            else:
-                # compute instead as a difference of supports
-                # pcn x c x pc * (pc - 1) // 2 tensor
-                pcLI = pcMPpR - pcMPpC
+                pcMPpC = pcMPp[:, :, pcIMC]
+                if not self.trained_on_penultimate_:
+                    # For every pcn and c contains top right triangle of pairwise probs p_ij
+                    # pcn x c x pc * (pc - 1) // 2 tensor
+                    pcPWP = pcMPpR / (pcMPpR + pcMPpC)
 
-            # Flattened logits in order of dimensions: pcn; pc x pc top right triangle by rows; c
-            pcLIflat = pcLI.transpose(1, 2).flatten()
+                    # logit pairwise probs
+                    # pcn x c x pc * (pc - 1) // 2 tensor
+                    pcLI = logit(pcPWP, self.logit_eps_)
+                else:
+                    # compute instead as a difference of supports
+                    # pcn x c x pc * (pc - 1) // 2 tensor
+                    pcLI = pcMPpR - pcMPpC
 
-            # Number of values in top right triangle
-            val_ps = pc * (pc - 1) // 2
-            # kxk matrix row indexes of values in pcLIflat without considering c sources
-            I1woc = pcMi[:, pcIMR]
-            # kxk matrix row indexes of values in pcLIflat
-            I1 = I1woc.repeat_interleave(c)
-            # kxk matrix column indexes of values in pcLIflat without considering c sources
-            I2woc = pcMi[:, pcIMC]
-            # kxk matrix column indexes of values in pcLIflat
-            I2 = I2woc.repeat_interleave(c)
-            # source indexes of values in pcLIflat
-            I3 = torch.arange(c, device=self.dev_).repeat(pcn * val_ps)
+                # Flattened logits in order of dimensions: pcn; pc x pc top right triangle by rows; c
+                pcLIflat = pcLI.transpose(1, 2).flatten()
 
-            # Extract lda coefficients
-            Ws = self.coefs_[I1, I2, I3]
-            Bs = self.coefs_[I1woc.flatten(), I2woc.flatten(), c]
+                # Number of values in top right triangle
+                val_ps = pc * (pc - 1) // 2
+                # kxk matrix row indexes of values in pcLIflat without considering c sources
+                I1woc = pcMi[:, pcIMR]
+                # kxk matrix row indexes of values in pcLIflat
+                I1 = I1woc.repeat_interleave(c)
+                # kxk matrix column indexes of values in pcLIflat without considering c sources
+                I2woc = pcMi[:, pcIMC]
+                # kxk matrix column indexes of values in pcLIflat
+                I2 = I2woc.repeat_interleave(c)
+                # source indexes of values in pcLIflat
+                I3 = torch.arange(c, device=self.dev_).repeat(pcn * val_ps)
 
-            # Apply lda predict_proba
-            pcLC = pcLIflat * Ws
-            pcDEC = torch.sum(pcLC.view(pcn * val_ps, c), 1) + Bs
-            CPWP = 1 / (1 + torch.exp(-pcDEC))
+                # Extract lda coefficients
+                Ws = self.coefs_[I1, I2, I3]
+                Bs = self.coefs_[I1woc.flatten(), I2woc.flatten(), c]
 
-            # Build dense matrices of pairwise probabilities disregarding original positions in all-class setting
-            dI0 = torch.arange(0, pcn, device=self.dev_, dtype=self.dtp_).repeat_interleave(val_ps)
-            dI1 = pcIMR.repeat(pcn)
-            dI2 = pcIMC.repeat(pcn)
+                # Apply lda predict_proba
+                pcLC = pcLIflat * Ws
+                pcDEC = torch.sum(pcLC.view(pcn * val_ps, c), 1) + Bs
+                CPWP = 1 / (1 + torch.exp(-pcDEC))
 
-            I = torch.cat((dI0.unsqueeze(0), dI1.unsqueeze(0), dI2.unsqueeze(0)), 0)
-            DPS = torch.sparse_coo_tensor(I, CPWP, (pcn, pc, pc), device=self.dev_, dtype=self.dtp_).to_dense()
-            It = torch.cat((dI0.unsqueeze(0), dI2.unsqueeze(0), dI1.unsqueeze(0)), 0)
-            DPSt = torch.sparse_coo_tensor(It, 1 - CPWP, (pcn, pc, pc), device=self.dev_, dtype=self.dtp_).to_dense()
-            # DPS now should contain pairwise probabilities
-            DPS = DPS + DPSt
+                # Build dense matrices of pairwise probabilities disregarding original positions in all-class setting
+                dI0 = torch.arange(0, pcn, device=self.dev_, dtype=self.dtp_).repeat_interleave(val_ps)
+                dI1 = pcIMR.repeat(pcn)
+                dI2 = pcIMC.repeat(pcn)
 
-            pcPS = PWComb(DPS)
+                I = torch.cat((dI0.unsqueeze(0), dI1.unsqueeze(0), dI2.unsqueeze(0)), 0)
+                DPS = torch.sparse_coo_tensor(I, CPWP, (pcn, pc, pc), device=self.dev_, dtype=self.dtp_).to_dense()
+                It = torch.cat((dI0.unsqueeze(0), dI2.unsqueeze(0), dI1.unsqueeze(0)), 0)
+                DPSt = torch.sparse_coo_tensor(It, 1 - CPWP, (pcn, pc, pc), device=self.dev_, dtype=self.dtp_).to_dense()
+                # DPS now should contain pairwise probabilities
+                DPS = DPS + DPSt
 
-            # resulting posteriors for samples with pc picked classes
-            ps_cur = torch.zeros(pcn, k, device=self.dev_, dtype=self.dtp_)
-            row_mask = (NPC == pc)
-            ps_cur[M[row_mask]] = torch.flatten(pcPS)
-            # Insert current results into complete tensor of posteriors
-            ps[row_mask] = ps_cur
+                pcPS = PWComb(DPS)
 
+                # resulting posteriors for samples with pc picked classes
+                ps_cur = torch.zeros(pcn, k, device=self.dev_, dtype=self.dtp_)
+                row_mask = (NPC == pc)
+                ps_cur[M[row_mask]] = torch.flatten(pcPS)
+                # Insert current results into complete tensor of posteriors
+                ps[row_mask] = ps_cur
+
+            ps_list.append(ps)
+
+        ps_full = torch.cat(ps_list, dim=0)
         end = timer()
         print("Predict proba topl fast finished in " + str(end - start) + " s")
 
-        return ps
+        return ps_full
 
     def save(self, file):
         """

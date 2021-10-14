@@ -120,7 +120,28 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
         for cm in comb_methods:
             print("Testing combining method " + cm.__name__)
             if combining_topl > 0:
-                PPtl = WE.predict_proba_topl_fast(tcs_test, combining_topl, cm)
+                fin = False
+                tries = 0
+                cur_n = tcs_test.shape[1]
+                while not fin and tries < 20 and cur_n > 0:
+                    if tries > 0:
+                        torch.cuda.empty_cache()
+                        print('Trying again, try {}, batch size {}'.format(tries, cur_n))
+                    try:
+                        PPtl = WE.predict_proba_topl_fast(tcs_test, combining_topl, cm, batch_size=cur_n)
+                        fin = True
+                    except RuntimeError as rerr:
+                        if 'memory' not in str(rerr):
+                            raise rerr
+                        print("OOM Exception")
+                        del rerr
+                        cur_n = cur_n // 2
+                        tries += 1
+
+                if not fin:
+                    print('Unsuccessful')
+                    return -1
+
             else:
                 PPtl = WE.predict_proba(tcs_test, cm)
 
