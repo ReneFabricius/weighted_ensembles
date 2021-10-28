@@ -265,7 +265,7 @@ class WeightedLDAEnsemble:
         self.trained_on_penultimate_ = True
         print("Fit finished in " + str(end - start) + " s")'''
 
-    def predict_proba(self, MP, PWComb, debug_pwcm=False):
+    def predict_proba(self, MP, PWComb, debug_pwcm=False, output_R=False):
         """
         Combines outputs of constituent classifiers using all classes.
         :param MP: c x n x k tensor of constituent classifiers posteriors
@@ -313,7 +313,13 @@ class WeightedLDAEnsemble:
         end = timer()
         print("Predict proba finished in " + str(end - start) + " s")
 
-        return PWComb(p_probs.to(device=self.dev_, dtype=self.dtp_), verbose=debug_pwcm)
+        R_dev_dtp = p_probs.to(device=self.dev_, dtype=self.dtp_)
+        probs = PWComb(R_dev_dtp, verbose=debug_pwcm)
+
+        if output_R:
+            return probs, p_probs
+
+        return probs
 
     def test_pairwise(self, MP, tar):
         for fc in range(self.k_):
