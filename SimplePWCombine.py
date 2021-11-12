@@ -96,14 +96,19 @@ def m2_iter(PP, verbose=False):
     dtype = PP.dtype
     n, k, kk = PP.size()
     assert k == kk
+
     max_iter = max(100, k)  # As per LIBSVM implementation
     eps = 1e-12 / k
     min_prob = (1e-16 if dtype == torch.float64 else 1e-7)  # As per LIBSVM
-    not_diag = torch.logical_xor(torch.ones(k, k, dtype=torch.bool, device=device),
-                                 torch.eye(k, dtype=torch.bool, device=device))
 
+    # Masked select is bugged, uses too much memory and causes memory leak when it fails
+    not_diag = torch.logical_xor(torch.ones(k, k, dtype=torch.bool, device=torch.device("cpu")),
+                                 torch.eye(k, dtype=torch.bool, device=torch.device("cpu")))
+
+    PP = PP.cpu()
     PP[(PP < min_prob) & not_diag] = min_prob
     PP[(PP > (1 - min_prob)) & not_diag] = 1 - min_prob
+    PP = PP.to(device=device)
 
     Q = (PP * PP).sum(dim=1).diag_embed() - PP * PP.transpose(1, 2)
 

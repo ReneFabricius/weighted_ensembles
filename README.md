@@ -4,7 +4,7 @@ It is able to combine variable number of multiclass probabilistic classifiers pr
 This ensembling method employs LDA model for combining every pair of classes, therefore, it requires training.
 
 ## Algorithm description
-WeightedLDAEnsemble training and prediction phases can be described by the following diagram.
+WeightedLinearEnsemble training and prediction phases can be described by the following diagram.
 <img src="https://github.com/ReneFabricius/weighted_ensembles/blob/master/Weighted%20LDA%20Flowchart.svg" height="800" />  
 First, the ensemble constituing probabilistic classifiers need to be obtained. This can be done either by training them, or by using pretrained models.
 Then we need to obtain probabilistic classifications from these constituent models for samples in the LDA training dataset.
@@ -19,7 +19,7 @@ large number of classes, method *predict_proba_topl_fast* may be used. This meth
 of the constituent classifiers and performs the combination on the union of these classes. Combination computation is also performed in a more optimized manner than in the method *predict_proba*.
 
 ## Usage
-Weighted LDA Ensemble can be used in custom applications by importing the WeightedLDAEnsemble class from WeightedLDAEnsemble.py.
+Weighted LDA Ensemble can be used in custom applications by importing the WeightedLinearEnsemble class from WeightedLinearEnsemble.py.
 There is also a script prepared for combining probability classifiers given their outputs on a set for LDA training and their outputs on testing set.
 This script is available in the file general_test.py as the function ensemble_general_test.
 

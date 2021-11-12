@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import functools
 from weighted_ensembles.predictions_evaluation import compute_acc_topk
-from weighted_ensembles.WeightedLDAEnsemble import WeightedLDAEnsemble
+from weighted_ensembles.WeightedLinearEnsemble import WeightedLinearEnsemble
 
 
 def ensemble_general_test(data_train_path, data_test_path, targets, order, output_folder, output_model_fold, comb_methods,
@@ -78,7 +78,7 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
             print("Accuracy of train input (topk " + str(testing_topk) + ") " + str(npy_files_train[nni]) +
                   ": " + str(acci))
 
-        WE = WeightedLDAEnsemble(c=c, k=k, device=device, dtp=dtype)
+        WE = WeightedLinearEnsemble(c=c, k=k, device=device, dtp=dtype)
 
         if not fit_on_penultimate:
             WE.fit(tcs, tar, verbose, test_normality)
@@ -88,7 +88,7 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
         if save_pvals:
             WE.save_pvals(os.path.join(output_folder, "p_values.npy"))
     else:
-        WE = WeightedLDAEnsemble(device=device, dtp=dtype)
+        WE = WeightedLinearEnsemble(device=device, dtp=dtype)
         WE.load(models_load_file)
         c = WE.c_
         k = WE.k_
@@ -204,7 +204,7 @@ def test_averaging_combination(data_test_path, targets, order, output_folder, co
     tcs_test = torch.cat(list(map(functools.partial(process_file, fold=data_test_path), np.array(npy_files_test))), 0)
 
     c, n, k = tcs_test.size()
-    WE = WeightedLDAEnsemble(c=c, k=k, device=device, dtp=dtype)
+    WE = WeightedLinearEnsemble(c=c, k=k, device=device, dtp=dtype)
     WE.set_averaging_weights()
 
     has_test_tar = os.path.isfile(os.path.join(data_test_path, targets))

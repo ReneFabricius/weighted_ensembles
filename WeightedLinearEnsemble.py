@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.linear_model import LogisticRegression
 import pickle
 import pandas as pd
 from scipy.stats import normaltest
@@ -9,7 +10,7 @@ from timeit import default_timer as timer
 from weighted_ensembles.utils import logit, pairwise_accuracies, pairwise_accuracies_penultimate
 
 
-class WeightedLDAEnsemble:
+class WeightedLinearEnsemble:
     def __init__(self, c=0, k=0, device=torch.device("cpu"), dtp=torch.float32):
         """
         Trainable ensembling of classification posteriors.
@@ -24,13 +25,14 @@ class WeightedLDAEnsemble:
         self.c_ = c
         self.k_ = k
         self.coefs_ = torch.zeros(k, k, c + 1, device=self.dev_, dtype=self.dtp_)
-        self.ldas_ = [[None for _ in range(k)] for _ in range(k)]
+        self.cls_models_ = [[None for _ in range(k)] for _ in range(k)]
         self.pvals_ = None
         self.trained_on_penultimate_ = None
 
-    def fit(self, MP, tar, verbose=False, test_normality=False):
+    def fit(self, MP, tar, linear_classifier="lda", verbose=False, test_normality=False):
         """
         Trains lda on logits of pairwise probabilities for every pair of classes
+        :param linear_classifier: linear classifier to use: lda, logreg and logreg_no_interc are supported
         :param MP: c x n x k tensor of constituent classifiers outputs.
         c - number of constituent classifiers, n - number of training samples, k - number of classes
         :param tar: n tensor of sample labels
@@ -88,9 +90,19 @@ class WeightedLDAEnsemble:
                             print("P-values of normality test for class " + str(sc))
                             print(str(sc_pval))
 
-                    clf = LinearDiscriminantAnalysis(solver='lsqr')
+                    if linear_classifier == "lda":
+                        clf = LinearDiscriminantAnalysis(solver='lsqr')
+                    elif linear_classifier == "logreg":
+                        clf = LogisticRegression()
+                    elif linear_classifier == "logreg_no_interc":
+                        clf = LogisticRegression(fit_intercept=False)
+                    else:
+                        print("Error: unknown linear classifier: {}".format(linear_classifier))
+                        return 1
+
                     clf.fit(X, y)
-                    self.ldas_[fc][sc] = clf
+
+                    self.cls_models_[fc][sc] = clf
                     self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
                                                         torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
 
@@ -115,9 +127,10 @@ class WeightedLDAEnsemble:
         self.trained_on_penultimate_ = False
         print("Fit finished in " + str(end - start) + " s")
 
-    def fit_penultimate(self, MP, tar, verbose=False, test_normality=False):
+    def fit_penultimate(self, MP, tar, linear_classifier="lda", verbose=False, test_normality=False):
         """
         Trains lda on supports of penultimate layer for every pair of classes
+        :param linear_classifier: linear classifier to use: lda, logreg and logreg_no_interc are supported
         :param MP: c x n x k tensor of constituent classifiers penultimate layer outputs.
         c - number of constituent classifiers, n - number of training samples, k - number of classes
         :param tar: n tensor of sample labels
@@ -169,9 +182,19 @@ class WeightedLDAEnsemble:
                             print("P-values of normality test for class " + str(sc))
                             print(str(sc_pval))
 
-                    clf = LinearDiscriminantAnalysis(solver='lsqr')
+                    if linear_classifier == "lda":
+                        clf = LinearDiscriminantAnalysis(solver='lsqr')
+                    elif linear_classifier == "logreg":
+                        clf = LogisticRegression()
+                    elif linear_classifier == "logreg_no_interc":
+                        clf = LogisticRegression(fit_intercept=False)
+                    else:
+                        print("Error: unknown linear classifier: {}".format(linear_classifier))
+                        return 1
+
                     clf.fit(X.detach().cpu(), y.detach().cpu())
-                    self.ldas_[fc][sc] = clf
+
+                    self.cls_models_[fc][sc] = clf
                     self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
                                                         torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
 
@@ -198,76 +221,12 @@ class WeightedLDAEnsemble:
         self.trained_on_penultimate_ = True
         print("Fit finished in " + str(end - start) + " s")
 
-    '''def fit_fast_penultimate(self, MP, tar, verbose=False):
-        """
-        Trains lda on supports of penultimate layer for every pair of classes
-        :param MP: c x n x k tensor of constituent classifiers penultimate layer outputs.
-        c - number of constituent classifiers, n - number of training samples, k - number of classes
-        :param tar: n tensor of sample labels
-        :param verbose: print more detailed output
-        :param test_normality: test normality of lda predictors for each class in each class pair
-        :return:
-        """
-
-        print("Starting fit fast")
-        start = timer()
-        with torch.no_grad():
-            tar = tar.to(device=self.dev_, dtype=self.dtp_)
-            MP = MP.to(device=self.dev_, dtype=self.dtp_)
-            class_counts = torch.bincount(tar)
-            priors = class_counts / torch.sum(class_counts)
-
-
-
-
-            pi = 0
-            for fc in range(self.k_):
-                for sc in range(fc + 1, self.k_):
-                    if print_step > 0 and pi % print_step == 0:
-                        print("Fit progress " + str(pi // print_step) + "%", end="\r")
-
-                    # c x n tensor containing True for samples belonging to classes fc, sc
-                    SamM = (tar == fc) + (tar == sc)
-                    # c x s x 1 tensor, where s is number of samples in classes fc and sc.
-                    # Tensor contains support of networks for class fc minus support for class sc
-                    SS = MP[:, SamM][:, :, fc] - MP[:, SamM][:, :, sc]
-
-                    # s x c tensor of logit supports of k networks for class fc against class sc for s samples
-                    X = SS.squeeze().transpose(0, 1)
-                    # Prepare targets
-                    y = tar[SamM]
-                    mask_fc = (y == fc)
-                    mask_sc = (y == sc)
-                    y[mask_fc] = 1
-                    y[mask_sc] = 0
-
-                    clf = LinearDiscriminantAnalysis(solver='lsqr')
-                    clf.fit(X.detach().cpu(), y.detach().cpu())
-                    self.ldas_[fc][sc] = clf
-                    self.coefs_[fc, sc, :] = torch.cat(
-                        (torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
-                         torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
-
-                    if verbose:
-                        pwacc = pairwise_accuracies_penultimate(SS, y)
-                        print("Training pairwise accuracies for classes: " + str(fc) + ", " + str(sc) +
-                              "\n\tpairwise accuracies: " + str(pwacc) +
-                              "\n\tchosen coefficients: " + str(clf.coef_) +
-                              "\n\tintercept: " + str(clf.intercept_))
-                        if self.dev_.type == "cpu":
-                            print("\tcombined accuracy: " + str(clf.score(X, y)))
-                        else:
-                            print("\tcombined accuracy: " + str(clf.score(X.detach().cpu(), y.detach().cpu())))
-
-                    pi += 1
-
-        end = timer()
-        self.trained_on_penultimate_ = True
-        print("Fit finished in " + str(end - start) + " s")'''
-
-    def predict_proba(self, MP, PWComb, debug_pwcm=False, output_R=False):
+    def predict_proba(self, MP, PWComb, debug_pwcm=False, output_R=False, batch_size=None):
         """
         Combines outputs of constituent classifiers using all classes.
+        :param batch_size: batch size for coupling method, default None - single batch
+        :param output_R: whether to output as a second return the R matrices which enter into coupling method
+        :param debug_pwcm: whether to print detailed outputs from coupling method
         :param MP: c x n x k tensor of constituent classifiers posteriors
         c - number of constituent classifiers, n - number of training samples, k - number of classes
         :param PWComb: coupling method to use
@@ -306,7 +265,7 @@ class WeightedLDAEnsemble:
                         SS = SS.squeeze()
                     X = SS.transpose(0, 1)
 
-                PP = self.ldas_[fc][sc].predict_proba(X.detach().cpu())
+                PP = self.cls_models_[fc][sc].predict_proba(X.detach().cpu())
                 p_probs[:, sc, fc] = torch.from_numpy(PP[:, 0])
                 p_probs[:, fc, sc] = torch.from_numpy(PP[:, 1])
 
@@ -314,7 +273,14 @@ class WeightedLDAEnsemble:
         print("Predict proba finished in " + str(end - start) + " s")
 
         R_dev_dtp = p_probs.to(device=self.dev_, dtype=self.dtp_)
-        probs = PWComb(R_dev_dtp, verbose=debug_pwcm)
+
+        b_size = batch_size if batch_size is not None else n
+        prob_batches = []
+        for start_ind in range(0, n, b_size):
+            batch_probs = PWComb(R_dev_dtp[start_ind:(start_ind + b_size), :, :], verbose=debug_pwcm)
+            prob_batches.append(batch_probs)
+
+        probs = torch.cat(prob_batches, dim=0)
 
         if output_R:
             return probs, p_probs
@@ -340,10 +306,10 @@ class WeightedLDAEnsemble:
                 print(
                     "Testing pairwise accuracies for classes: " + str(fc) + ", " + str(sc) +
                     "\n\tpairwise accuracies: " + str(pwacc) +
-                    "\n\tchosen coefficients: " + str(self.ldas_[fc][sc].coef_) +
-                    "\n\tintercept: " + str(self.ldas_[fc][sc].intercept_))
+                    "\n\tchosen coefficients: " + str(self.cls_models_[fc][sc].coef_) +
+                    "\n\tintercept: " + str(self.cls_models_[fc][sc].intercept_))
 
-                print("\tcombined accuracy: " + str(self.ldas_[fc][sc].score(X, y)))
+                print("\tcombined accuracy: " + str(self.cls_models_[fc][sc].score(X, y)))
 
     def predict_proba_topl(self, MP, l, PWComb):
         """
@@ -394,7 +360,7 @@ class WeightedLDAEnsemble:
                     else:
                         SS = MP[:, ni, fc] - MP[:, ni, sc]
                         X = SS.T.unsqueeze(0)
-                    PP = self.ldas_[fc][sc].predict_proba(X)
+                    PP = self.cls_models_[fc][sc].predict_proba(X)
                     p_probs[:, fci + 1 + sci, fci] = torch.from_numpy(PP[:, 0])
                     p_probs[:, fci, fci + 1 + sci] = torch.from_numpy(PP[:, 1])
 
@@ -567,7 +533,7 @@ class WeightedLDAEnsemble:
         :return:
         """
         print("Saving models into file: " + str(file))
-        dump_dict = {"ldas": self.ldas_, "on_penult": self.trained_on_penultimate_}
+        dump_dict = {"ldas": self.cls_models_, "on_penult": self.trained_on_penultimate_}
         with open(file, 'wb') as f:
             pickle.dump(dump_dict, f)
 
@@ -580,24 +546,24 @@ class WeightedLDAEnsemble:
         print("Loading models from file: " + str(file))
         with open(file, 'rb') as f:
             dump_dict = pickle.load(f)
-            self.ldas_ = dump_dict["ldas"]
+            self.cls_models_ = dump_dict["ldas"]
             self.trained_on_penultimate_ = dump_dict["on_penult"]
 
-        self.k_ = len(self.ldas_)
+        self.k_ = len(self.cls_models_)
         if self.k_ > 0:
-            self.c_ = len(self.ldas_[0][1].coef_[0])
+            self.c_ = len(self.cls_models_[0][1].coef_[0])
 
         self.coefs_ = torch.zeros(self.k_, self.k_, self.c_ + 1, device=self.dev_, dtype=self.dtp_)
 
-        for fc in range(len(self.ldas_)):
-            for sc in range(fc + 1, len(self.ldas_[fc])):
-                clf = self.ldas_[fc][sc]
+        for fc in range(len(self.cls_models_)):
+            for sc in range(fc + 1, len(self.cls_models_[fc])):
+                clf = self.cls_models_[fc][sc]
                 self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
                                                     torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
 
     def save_coefs_csv(self, file):
         """
-        Save trained lda coefficients into a csv file.
+        Save linear coefficients into a csv file.
         :param file: file to save the coefficients to
         :return:
         """
