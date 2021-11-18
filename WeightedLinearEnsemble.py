@@ -528,25 +528,25 @@ class WeightedLinearEnsemble:
 
     def save(self, file):
         """
-        Save trained lda models into a file.
+        Save trained ensemble into a file.
         :param file: file to save the models to
         :return:
         """
-        print("Saving models into file: " + str(file))
-        dump_dict = {"ldas": self.cls_models_, "on_penult": self.trained_on_penultimate_}
+        print("Saving ensemble into file: " + str(file))
+        dump_dict = {"models": self.cls_models_, "on_penult": self.trained_on_penultimate_}
         with open(file, 'wb') as f:
             pickle.dump(dump_dict, f)
 
     def load(self, file):
         """
-        Load trained lda models from a file
-        :param file: file to load the models from
+        Load trained ensemble from a file.
+        :param file: File to load the ensemble from.
         :return:
         """
         print("Loading models from file: " + str(file))
         with open(file, 'rb') as f:
             dump_dict = pickle.load(f)
-            self.cls_models_ = dump_dict["ldas"]
+            self.cls_models_ = dump_dict["models"]
             self.trained_on_penultimate_ = dump_dict["on_penult"]
 
         self.k_ = len(self.cls_models_)

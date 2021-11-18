@@ -72,3 +72,56 @@ def compute_nll(y_cor, ps, penultimate=False):
     nll = torch.nn.NLLLoss(reduction='sum')
     return nll(ps_thr, y_cor).item()
 
+
+def _comp_ece(bin_n, bins, top_probs, cor_pred, p_norm=2):
+    ece = 0.0
+    monotonic = True
+    last_ym = -1
+    dtp = top_probs.dtype
+    for i in range(bin_n):
+        cur = (bins == i)
+        if any(cur):
+            fxm = torch.mean(top_probs[cur])
+            ym = torch.mean(cor_pred[cur].to(dtype=dtp))
+            if ym < last_ym:
+                monotonic = False
+            last_ym = ym
+            bin_sam_n = torch.sum(cur)
+            ece += bin_sam_n * torch.pow(torch.abs(ym - fxm), p_norm)
+    return (torch.pow(ece / top_probs.shape[0], 1. / p_norm)).item(), monotonic
+
+
+def ECE_sweep(prob_pred, tar, p_norm=2):
+    """
+    Computes estimate of calibration error according to equal mass monotonic sweep algorithm.
+    As per https://arxiv.org/abs/2012.08668v2
+    :param prob_pred: Probabilities prediction. n×k tensor with n samples and k classes.
+    :param tar: Correct labels. n tensor with n samples.
+    :return: Estimate of calibration error.
+    """
+    n, k = prob_pred.shape
+    dev = prob_pred.device
+    top_probs, top_inds = torch.topk(input=prob_pred, k=1, dim=1)
+    top_probs = top_probs.squeeze()
+    top_inds = top_inds.squeeze()
+    cor_pred = top_inds == tar
+    bins = torch.zeros(n, device=dev, dtype=torch.long)
+    sample_sort_idxs = torch.argsort(top_probs)
+    last_ece = None
+
+    for bin_n in range(2, n + 1):
+        bin_assign = torch.min(torch.tensor([bin_n - 1], device=dev, dtype=torch.long),
+                               torch.div(torch.arange(start=0, end=n, device=dev) * bin_n, n, rounding_mode='floor').to(dtype=torch.long))
+        bins[sample_sort_idxs] = bin_assign
+        ece, mon = _comp_ece(bin_n=bin_n, bins=bins, top_probs=top_probs, cor_pred=cor_pred, p_norm=p_norm)
+        if mon:
+            last_ece = ece
+        else:
+            if last_ece is not None:
+                return last_ece
+            else:
+                bins = torch.zeros(n, device=dev)
+                ece, mon = _comp_ece(bin_n=1, bins=bins, top_probs=top_probs, cor_pred=cor_pred, p_norm=p_norm)
+                return ece
+
+    return last_ece
