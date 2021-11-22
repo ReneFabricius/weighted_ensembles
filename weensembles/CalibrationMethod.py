@@ -7,7 +7,7 @@ from timeit import default_timer as timer
 from torch.nn import Softmax, LogSoftmax, NLLLoss
 import torch
 
-from weighted_ensembles.predictions_evaluation import ECE_sweep
+from weensembles.predictions_evaluation import ECE_sweep
 
 
 class CalibrationMethod(ABC):

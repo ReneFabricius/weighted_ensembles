@@ -7,7 +7,7 @@ import pandas as pd
 from scipy.stats import normaltest
 from timeit import default_timer as timer
 
-from weighted_ensembles.utils import logit, pairwise_accuracies, pairwise_accuracies_penultimate
+from weensembles.utils import logit, pairwise_accuracies, pairwise_accuracies_penultimate
 
 
 class WeightedLinearEnsemble:

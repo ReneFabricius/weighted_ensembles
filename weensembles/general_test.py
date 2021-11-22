@@ -2,8 +2,8 @@ import os
 import torch
 import numpy as np
 import functools
-from weighted_ensembles.predictions_evaluation import compute_acc_topk
-from weighted_ensembles.WeightedLinearEnsemble import WeightedLinearEnsemble
+from weensembles.predictions_evaluation import compute_acc_topk
+from weensembles.WeightedLinearEnsemble import WeightedLinearEnsemble
 
 
 def ensemble_general_test(data_train_path, data_test_path, targets, order, output_folder, output_model_fold, comb_methods,
