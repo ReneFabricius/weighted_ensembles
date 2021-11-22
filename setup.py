@@ -1,6 +1,6 @@
 from setuptools import setup
 
-setup(name='WeightedEnsembles',
+setup(name='weighted_ensembles',
       version='1.0',
       description='Library for combining probabilistic classifiers',
       author='Rene Fabricius',
