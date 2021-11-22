@@ -50,7 +50,7 @@ class TemperatureScaling(CalibrationMethod):
         :param start_temp: Starting temperature. 1.0 means no change.
         :param max_iter: maximum number of iterations of optimizer
         """
-        self.temp_ = torch.tensor([start_temp], device=device, dtype=dtp)
+        self.temp_ = torch.tensor([start_temp], device=device, dtype=dtp, requires_grad=True)
         self.max_iter_ = max_iter
         self.dev_ = device
         self.dtp_ = dtp
@@ -66,7 +66,7 @@ class TemperatureScaling(CalibrationMethod):
 
         l_sm = LogSoftmax(dim=1)
         nll = NLLLoss()
-        loss = nll(l_sm(logit_pred / temp.item()), tar)
+        loss = nll(l_sm(torch.div(logit_pred, temp)), tar)
 
         return loss
 
