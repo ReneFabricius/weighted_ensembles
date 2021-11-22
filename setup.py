@@ -5,6 +5,5 @@ setup(name='weighted_ensembles',
       description='Library for combining probabilistic classifiers',
       author='Rene Fabricius',
       author_email='quadrupedans@gmail.com',
-      packages=['weighted_ensembles'],
-      package_dir={'weighted_ensembles': ''}
+      packages=['']
      )
