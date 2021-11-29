@@ -30,7 +30,8 @@ def m1(PP, verbose=False):
     if verbose:
         print("Solving linear system\n{}\n× x =\n{}".format(A.cpu().numpy(), B.cpu().numpy()))
 
-    Xs, LUs = torch.solve(B, A)
+    Xs = torch.linalg.solve(A, B)
+    
     ps = Xs[:, 0:k, 0:1].squeeze(2)
 
     if verbose:
@@ -71,7 +72,7 @@ def m2(PP, verbose=False):
     if verbose:
         print("Solving linear system\n{}\n× x =\n{}".format(A.cpu().numpy(), B.cpu().numpy()))
 
-    Xs, LUs = torch.solve(B, A)
+    Xs = torch.linalg.solve(A, B)
     ps = Xs[:, 0:k, 0:1].squeeze(2)
 
     if verbose:
