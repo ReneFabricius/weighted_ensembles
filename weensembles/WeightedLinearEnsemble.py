@@ -29,196 +29,117 @@ class WeightedLinearEnsemble:
         self.pvals_ = None
         self.trained_on_penultimate_ = None
 
-    def fit(self, MP, tar, linear_classifier="lda", verbose=False, test_normality=False):
+    @torch.no_grad()
+    def fit(self, MP, tar, linear_classifier="lda",
+            verbose=False, test_normality=False, penultimate=True):
         """
-        Trains lda on logits of pairwise probabilities for every pair of classes
+        Trains linear classifier on logits of pairwise probabilities for every pair of classes
         :param linear_classifier: linear classifier to use: lda, logreg and logreg_no_interc are supported
         :param MP: c x n x k tensor of constituent classifiers outputs.
         c - number of constituent classifiers, n - number of training samples, k - number of classes
         :param tar: n tensor of sample labels
         :param verbose: print more detailed output
         :param test_normality: test normality of lda predictors for each class in each class pair
+        :param penultimate: Whether outputs of classifiers in parameter MP are from penultimate layer(logits) or from softmax.
         :return:
         """
 
         print("Starting fit")
         start = timer()
-        with torch.no_grad():
-            num = self.k_ * (self.k_ - 1) // 2      # Number of pairs of classes
-            if test_normality:
-                self.pvals_ = torch.zeros(num, 2, self.c_, device=torch.device("cpu"), dtype=self.dtp_)
-            print_step = num // 100
+        num = self.k_ * (self.k_ - 1) // 2      # Number of pairs of classes
+        if test_normality:
+            self.pvals_ = torch.zeros(num, 2, self.c_, device=torch.device("cpu"), dtype=self.dtp_)
+        print_step = num // 100
 
+        if not penultimate:
             num_non_one = torch.sum(torch.abs(torch.sum(MP, dim=2) - 1.0) > self.logit_eps_).item()
             if num_non_one > 0:
-                print("Warning: " + str(num_non_one) +
-                      " samples with non unit sum of supports found, performing softmax")
+                print("Warning: {} samples with non unit sum of supports found, \
+                      performing softmax".format(num_non_one))
                 MP = self.softmax_supports(MP)
 
-            pi = 0
-            for fc in range(self.k_):
-                for sc in range(fc + 1, self.k_):
-                    if print_step > 0 and pi % print_step == 0:
-                        print("Fit progress " + str(pi // print_step) + "%", end="\r")
+        pi = 0
+        for fc in range(self.k_):
+            for sc in range(fc + 1, self.k_):
+                if print_step > 0 and pi % print_step == 0:
+                    print("Fit progress {}%".format(pi // print_step), end="\r")
 
-                    # c x s x 2 tensor, where s is number of samples in classes fc and sc.
-                    # Tensor contains supports of networks for classes fc, sc for samples belonging to fc, sc.
-                    SS = MP[:, (tar == fc) + (tar == sc)][:, :, [fc, sc]].to(device=self.dev_, dtype=self.dtp_)
-                    # c x s tensor containing p_fc,sc pairwise probabilities for above mentioned samples
-                    PWP = torch.true_divide(SS[:, :, 0], torch.sum(SS, 2) + (SS[:, :, 0] == 0))
-                    LI = logit(PWP, self.logit_eps_)
-                    # s x c tensor of logit supports of k networks for class fc against class sc for s samples
-                    X = LI.transpose(0, 1).cpu()
-                    # Prepare targets
-                    y = tar[(tar == fc) + (tar == sc)]
-                    mask_fc = (y == fc)
-                    mask_sc = (y == sc)
-                    y[mask_fc] = 1
-                    y[mask_sc] = 0
-
-                    if test_normality:
-                        # Test normality of predictors
-                        #fc_pval = torch.tensor([normal_ad(X[mask_fc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
-                        #sc_pval = torch.tensor([normal_ad(X[mask_sc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
-                        fc_pval = torch.tensor(normaltest(X[mask_fc], 0)[1])
-                        sc_pval = torch.tensor(normaltest(X[mask_sc], 0)[1])
-                        self.pvals_[pi, 0, :] = fc_pval
-                        self.pvals_[pi, 1, :] = sc_pval
-                        if verbose:
-                            print("P-values of normality test for class " + str(fc))
-                            print(str(fc_pval))
-                            print("P-values of normality test for class " + str(sc))
-                            print(str(sc_pval))
-
-                    if linear_classifier == "lda":
-                        clf = LinearDiscriminantAnalysis(solver='lsqr')
-                    elif linear_classifier == "logreg":
-                        clf = LogisticRegression()
-                    elif linear_classifier == "logreg_no_interc":
-                        clf = LogisticRegression(fit_intercept=False)
-                    else:
-                        print("Error: unknown linear classifier: {}".format(linear_classifier))
-                        return 1
-
-                    clf.fit(X, y)
-
-                    self.cls_models_[fc][sc] = clf
-                    self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
-                                                        torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
-
-                    if verbose:
-                        pwacc = pairwise_accuracies(SS, y)
-                        print("Training pairwise accuracies for classes: " + str(fc) + ", " + str(sc) +
-                              "\n\tpairwise accuracies: " + str(pwacc) +
-                              "\n\tchosen coefficients: " + str(clf.coef_) +
-                              "\n\tintercept: " + str(clf.intercept_))
-
-                        print("\tcombined accuracy: " + str(clf.score(X, y)))
-
-                    pi += 1
-
-            if test_normality:
-                blw_5 = torch.sum(self.pvals_ < 0.05)
-                blw_1 = torch.sum(self.pvals_ < 0.01)
-                print("Number of classes with normality pval below 5% " + str(blw_5.item()))
-                print("Number of classes with normality pval below 1% " + str(blw_1.item()))
-
-        end = timer()
-        self.trained_on_penultimate_ = False
-        print("Fit finished in " + str(end - start) + " s")
-
-    def fit_penultimate(self, MP, tar, linear_classifier="lda", verbose=False, test_normality=False):
-        """
-        Trains lda on supports of penultimate layer for every pair of classes
-        :param linear_classifier: linear classifier to use: lda, logreg and logreg_no_interc are supported
-        :param MP: c x n x k tensor of constituent classifiers penultimate layer outputs.
-        c - number of constituent classifiers, n - number of training samples, k - number of classes
-        :param tar: n tensor of sample labels
-        :param verbose: print more detailed output
-        :param test_normality: test normality of lda predictors for each class in each class pair
-        :return:
-        """
-
-        print("Starting fit")
-        start = timer()
-        with torch.no_grad():
-            num = self.k_ * (self.k_ - 1) // 2      # Number of pairs of classes
-            if test_normality:
-                self.pvals_ = torch.zeros(num, 2, self.c_, device=torch.device("cpu"), dtype=self.dtp_)
-            print_step = num // 100
-
-            pi = 0
-            for fc in range(self.k_):
-                for sc in range(fc + 1, self.k_):
-                    if print_step > 0 and pi % print_step == 0:
-                        print("Fit progress " + str(pi // print_step) + "%", end="\r")
-
-                    # c x n tensor containing True for samples belonging to classes fc, sc
-                    SamM = (tar == fc) + (tar == sc)
+                # c x n tensor containing True for samples belonging to classes fc, sc
+                SamM = (tar == fc) + (tar == sc)
+                if penultimate:
                     # c x s x 1 tensor, where s is number of samples in classes fc and sc.
                     # Tensor contains support of networks for class fc minus support for class sc
                     SS = MP[:, SamM][:, :, fc] - MP[:, SamM][:, :, sc]
 
                     # s x c tensor of logit supports of k networks for class fc against class sc for s samples
                     X = SS.squeeze().transpose(0, 1)
-                    # Prepare targets
-                    y = tar[SamM]
-                    mask_fc = (y == fc)
-                    mask_sc = (y == sc)
-                    y[mask_fc] = 1
-                    y[mask_sc] = 0
+ 
+                else:
+                    # c x s x 2 tensor, where s is number of samples in classes fc and sc.
+                    # Tensor contains supports of networks for classes fc, sc for samples belonging to fc, sc.
+                    SS = MP[:, SamM][:, :, [fc, sc]].to(device=self.dev_, dtype=self.dtp_)
+                    # c x s tensor containing p_fc,sc pairwise probabilities for above mentioned samples
+                    PWP = torch.true_divide(SS[:, :, 0], torch.sum(SS, 2) + (SS[:, :, 0] == 0))
+                    LI = logit(PWP, self.logit_eps_)
+                    # s x c tensor of logit supports of k networks for class fc against class sc for s samples
+                    X = LI.transpose(0, 1)
+                    
+                # Prepare targets
+                y = tar[SamM]
+                mask_fc = (y == fc)
+                mask_sc = (y == sc)
+                y[mask_fc] = 1
+                y[mask_sc] = 0
 
-                    if test_normality:
-                        # Test normality of predictors
-                        # fc_pval = torch.tensor([normal_ad(X[mask_fc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
-                        # sc_pval = torch.tensor([normal_ad(X[mask_sc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
-                        fc_pval = torch.tensor(normaltest(X[mask_fc].detach().cpu(), 0)[1])
-                        sc_pval = torch.tensor(normaltest(X[mask_sc].detach().cpu(), 0)[1])
-                        self.pvals_[pi, 0, :] = fc_pval
-                        self.pvals_[pi, 1, :] = sc_pval
-                        if verbose:
-                            print("P-values of normality test for class " + str(fc))
-                            print(str(fc_pval))
-                            print("P-values of normality test for class " + str(sc))
-                            print(str(sc_pval))
-
-                    if linear_classifier == "lda":
-                        clf = LinearDiscriminantAnalysis(solver='lsqr')
-                    elif linear_classifier == "logreg":
-                        clf = LogisticRegression()
-                    elif linear_classifier == "logreg_no_interc":
-                        clf = LogisticRegression(fit_intercept=False)
-                    else:
-                        print("Error: unknown linear classifier: {}".format(linear_classifier))
-                        return 1
-
-                    clf.fit(X.detach().cpu(), y.detach().cpu())
-
-                    self.cls_models_[fc][sc] = clf
-                    self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
-                                                        torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
-
+                if test_normality:
+                    # Test normality of predictors
+                    #fc_pval = torch.tensor([normal_ad(X[mask_fc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
+                    #sc_pval = torch.tensor([normal_ad(X[mask_sc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
+                    fc_pval = torch.tensor(normaltest(X[mask_fc], 0)[1])
+                    sc_pval = torch.tensor(normaltest(X[mask_sc], 0)[1])
+                    self.pvals_[pi, 0, :] = fc_pval
+                    self.pvals_[pi, 1, :] = sc_pval
                     if verbose:
-                        pwacc = pairwise_accuracies_penultimate(SS, y)
-                        print("Training pairwise accuracies for classes: " + str(fc) + ", " + str(sc) +
-                              "\n\tpairwise accuracies: " + str(pwacc) +
-                              "\n\tchosen coefficients: " + str(clf.coef_) +
-                              "\n\tintercept: " + str(clf.intercept_))
-                        if self.dev_.type == "cpu":
-                            print("\tcombined accuracy: " + str(clf.score(X, y)))
-                        else:
-                            print("\tcombined accuracy: " + str(clf.score(X.detach().cpu(), y.detach().cpu())))
+                        print("P-values of normality test for class " + str(fc))
+                        print(str(fc_pval))
+                        print("P-values of normality test for class " + str(sc))
+                        print(str(sc_pval))
 
-                    pi += 1
+                if linear_classifier == "lda":
+                    clf = LinearDiscriminantAnalysis(solver='lsqr')
+                elif linear_classifier == "logreg":
+                    clf = LogisticRegression()
+                elif linear_classifier == "logreg_no_interc":
+                    clf = LogisticRegression(fit_intercept=False)
+                else:
+                    print("Error: unknown linear classifier: {}".format(linear_classifier))
+                    return 1
 
-            if test_normality:
-                blw_5 = torch.sum(self.pvals_ < 0.05)
-                blw_1 = torch.sum(self.pvals_ < 0.01)
-                print("Number of classes with normality pval below 5% " + str(blw_5.item()))
-                print("Number of classes with normality pval below 1% " + str(blw_1.item()))
+                clf.fit(X.cpu(), y.cpu())
+
+                self.cls_models_[fc][sc] = clf
+                self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
+                                                    torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
+
+                if verbose:
+                    pwacc = pairwise_accuracies(SS, y)
+                    print("Training pairwise accuracies for classes: " + str(fc) + ", " + str(sc) +
+                            "\n\tpairwise accuracies: " + str(pwacc) +
+                            "\n\tchosen coefficients: " + str(clf.coef_) +
+                            "\n\tintercept: " + str(clf.intercept_))
+
+                    print("\tcombined accuracy: " + str(clf.score(X, y)))
+
+                pi += 1
+
+        if test_normality:
+            blw_5 = torch.sum(self.pvals_ < 0.05)
+            blw_1 = torch.sum(self.pvals_ < 0.01)
+            print("Number of classes with normality pval below 5% " + str(blw_5.item()))
+            print("Number of classes with normality pval below 1% " + str(blw_1.item()))
 
         end = timer()
-        self.trained_on_penultimate_ = True
+        self.trained_on_penultimate_ = penultimate
         print("Fit finished in " + str(end - start) + " s")
 
     def predict_proba(self, MP, PWComb, debug_pwcm=False, output_R=False, batch_size=None):
