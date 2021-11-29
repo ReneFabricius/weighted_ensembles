@@ -142,6 +142,7 @@ class WeightedLinearEnsemble:
         self.trained_on_penultimate_ = penultimate
         print("Fit finished in " + str(end - start) + " s")
 
+    @torch.no_grad()
     def predict_proba(self, MP, PWComb, debug_pwcm=False, output_R=False, batch_size=None):
         """
         Combines outputs of constituent classifiers using all classes.
@@ -208,6 +209,7 @@ class WeightedLinearEnsemble:
 
         return probs
 
+    @torch.no_grad()
     def test_pairwise(self, MP, tar):
         for fc in range(self.k_):
             for sc in range(fc + 1, self.k_):
@@ -232,6 +234,7 @@ class WeightedLinearEnsemble:
 
                 print("\tcombined accuracy: " + str(self.cls_models_[fc][sc].score(X, y)))
 
+    @torch.no_grad()
     def predict_proba_topl(self, MP, l, PWComb):
         """
         Combines outputs of constituent classifiers using only those classes, which are among the top l most probable
@@ -293,6 +296,7 @@ class WeightedLinearEnsemble:
 
         return ps
 
+    @torch.no_grad()
     def predict_proba_topl_fast(self, MP, l, PWComb, batch_size=None):
         """
         Better optimized version of predict_proba_topl
@@ -447,6 +451,7 @@ class WeightedLinearEnsemble:
 
         return ps_full
 
+    @torch.no_grad()
     def save(self, file):
         """
         Save trained ensemble into a file.
@@ -458,6 +463,7 @@ class WeightedLinearEnsemble:
         with open(file, 'wb') as f:
             pickle.dump(dump_dict, f)
 
+    @torch.no_grad()
     def load(self, file):
         """
         Load trained ensemble from a file.
@@ -482,6 +488,7 @@ class WeightedLinearEnsemble:
                 self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
                                                     torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
 
+    @torch.no_grad()
     def save_coefs_csv(self, file):
         """
         Save linear coefficients into a csv file.
@@ -500,6 +507,7 @@ class WeightedLinearEnsemble:
         df = pd.concat(Ls, ignore_index=True)
         df.to_csv(file, index=False)
 
+    @torch.no_grad()
     def save_pvals(self, file):
         """
         Save normality test p-values into a file, if these were computed during the training.
@@ -512,6 +520,7 @@ class WeightedLinearEnsemble:
         else:
             print("P-values not computed")
 
+    @torch.no_grad()
     def set_averaging_weights(self):
         """
         Set the lda weights equal to one.
@@ -521,6 +530,7 @@ class WeightedLinearEnsemble:
             for sc in range(fc + 1, self.k_):
                 self.coefs_[fc, sc, :] = torch.tensor([1]*self.c_ + [0])
 
+    @torch.no_grad()
     def softmax_supports(self, MP):
         """
         Performs softmax on posteriors
@@ -528,7 +538,4 @@ class WeightedLinearEnsemble:
         c - number of constituent classifiers, n - number of training samples, k - number of classes
         :return:c x n x k tensor of posteriors
         """
-        if self.dev_.type == 'cpu':
-            return torch.nn.Softmax(dim=2)(MP)
-
-        return torch.nn.Softmax(dim=2)(MP.to(device=self.dev_, dtype=self.dtp_)).cpu()
+        return torch.nn.Softmax(dim=-1)(MP)

@@ -1,6 +1,7 @@
 import torch
 
 
+@torch.no_grad()
 def compute_pairwise_accuracies(MP, tar):
     """
     Computes pairwise accuracies of multiclass classifier
@@ -34,6 +35,7 @@ def compute_pairwise_accuracies(MP, tar):
     return pw_acc
 
 
+@torch.no_grad()
 def get_correctness_masks(MP, tar, topk):
     if type(topk) == int:
         topk = [topk]
@@ -51,6 +53,7 @@ def get_correctness_masks(MP, tar, topk):
     return torch.cat(masks, 0)
 
 
+@torch.no_grad()
 def compute_acc_topk(y_cor, ps, l):
     top_v, top_i = torch.topk(ps, l, dim=1)
     n = y_cor.size()[0]
@@ -58,6 +61,7 @@ def compute_acc_topk(y_cor, ps, l):
     return torch.sum(top_i == y_cor.unsqueeze(1)).item() / n
 
 
+@torch.no_grad()
 def compute_nll(y_cor, ps, penultimate=False):
     if penultimate:
         lsf = torch.nn.LogSoftmax(dim=1)
@@ -73,6 +77,7 @@ def compute_nll(y_cor, ps, penultimate=False):
     return nll(ps_thr, y_cor).item()
 
 
+@torch.no_grad()
 def _comp_ece(bin_n, bins, top_probs, cor_pred, p_norm=2):
     ece = 0.0
     monotonic = True
@@ -91,6 +96,7 @@ def _comp_ece(bin_n, bins, top_probs, cor_pred, p_norm=2):
     return (torch.pow(ece / top_probs.shape[0], 1. / p_norm)).item(), monotonic
 
 
+@torch.no_grad()
 def ECE_sweep(prob_pred, tar, p_norm=2, penultimate=False):
     """
     Computes estimate of calibration error according to equal mass monotonic sweep algorithm.

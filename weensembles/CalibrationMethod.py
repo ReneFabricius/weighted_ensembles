@@ -55,6 +55,7 @@ class TemperatureScaling(CalibrationMethod):
         self.dev_ = device
         self.dtp_ = dtp
 
+    @torch.no_grad()
     def _nll_loss(self, temp, logit_pred, tar):
         """
         Computes nll loss for given temperature and data.
@@ -70,6 +71,7 @@ class TemperatureScaling(CalibrationMethod):
 
         return loss
 
+    @torch.no_grad()
     def fit(self, logit_pred, tar, verbose=False, solver="BFGS"):
         """
         Fits model to provided data.
@@ -108,6 +110,7 @@ class TemperatureScaling(CalibrationMethod):
 
         return 0
 
+    @torch.no_grad()
     def predict_proba(self, logit_pred, temp=None):
         """
         Computes calibrated probabilities.
@@ -123,6 +126,7 @@ class TemperatureScaling(CalibrationMethod):
 
         return sftm(logit_pred / temp.item())
 
+    @torch.no_grad()
     def get_model_coefs(self):
         """
         :return: DataFrame with temperature.

@@ -17,6 +17,7 @@ class CalibrationEnsemble:
         self.k_ = k
         self.cal_models_ = [None for _ in range(c)]
 
+    @torch.no_grad()
     def fit(self, MP, tar, calibration_method, verbose=False):
         """
         Fit the calibration model for each combined classifier.
@@ -37,6 +38,7 @@ class CalibrationEnsemble:
             self.cal_models_[ci] = calibration_method(device=self.dev_, dtp=self.dtp_)
             self.cal_models_[ci].fit(MP[ci], tar, verbose=verbose)
 
+    @torch.no_grad()
     def predict_proba(self, MP, output_net_preds=False):
         """
         Combines the outputs of classifiers and produces probabilities.
@@ -69,6 +71,7 @@ class CalibrationEnsemble:
 
         return prob
 
+    @torch.no_grad()
     def save(self, file):
         """
         Save ensemble into a file.
@@ -80,6 +83,7 @@ class CalibrationEnsemble:
         with open(file, 'wb') as f:
             pickle.dump(dump_dict, f)
 
+    @torch.no_grad()
     def load(self, file):
         """
         Load ensemble from a file
@@ -97,6 +101,7 @@ class CalibrationEnsemble:
             self.c_ = dump_dict["c"]
             self.k_ = dump_dict["k"]
 
+    @torch.no_grad()
     def save_coefs_csv(self, file):
         """
         Save calibration coefficients into a csv file.
