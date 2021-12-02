@@ -166,7 +166,7 @@ class WeightedLinearEnsemble:
         return 0
     
     @torch.no_grad()
-    def predict_proba(self, MP, PWComb, debug_pwcm=False, output_R=False, batch_size=None):
+    def predict_proba(self, MP, coupling_method, debug_pwcm=False, output_R=False, batch_size=None):
         """
         Combines outputs of constituent classifiers using all classes.
         :param batch_size: batch size for coupling method, default None - single batch
@@ -177,7 +177,7 @@ class WeightedLinearEnsemble:
         :param PWComb: coupling method to use
         :return: n x k tensor of combined posteriors
         """
-        print("Starting predict proba, pwc method {}".format(PWComb.__name__))
+        print("Starting predict proba, pwc method {}".format(coupling_method.__name__))
         if self.trained_on_penultimate_ is None:
             print("Ensemble not trained")
             return
@@ -222,7 +222,7 @@ class WeightedLinearEnsemble:
         b_size = batch_size if batch_size is not None else n
         prob_batches = []
         for start_ind in range(0, n, b_size):
-            batch_probs = PWComb(R_dev_dtp[start_ind:(start_ind + b_size), :, :], verbose=debug_pwcm)
+            batch_probs = coupling_method(R_dev_dtp[start_ind:(start_ind + b_size), :, :], verbose=debug_pwcm)
             prob_batches.append(batch_probs)
 
         probs = torch.cat(prob_batches, dim=0)
@@ -258,7 +258,7 @@ class WeightedLinearEnsemble:
                 print("\tcombined accuracy: " + str(self.cls_models_[fc][sc].score(X, y)))
 
     @torch.no_grad()
-    def predict_proba_topl(self, MP, l, PWComb):
+    def predict_proba_topl(self, MP, l, coupling_method):
         """
         Combines outputs of constituent classifiers using only those classes, which are among the top l most probable
         for some constituent classifier.
@@ -311,7 +311,7 @@ class WeightedLinearEnsemble:
                     p_probs[:, fci + 1 + sci, fci] = torch.from_numpy(PP[:, 0])
                     p_probs[:, fci, fci + 1 + sci] = torch.from_numpy(PP[:, 1])
 
-            sam_ps = PWComb(p_probs.to(device=self.dev_, dtype=self.dtp_))
+            sam_ps = coupling_method(p_probs.to(device=self.dev_, dtype=self.dtp_))
             ps[ni, Ti] = sam_ps.squeeze()
 
         end = timer()
@@ -320,7 +320,7 @@ class WeightedLinearEnsemble:
         return ps
 
     @torch.no_grad()
-    def predict_proba_topl_fast(self, MP, l, PWComb, batch_size=None):
+    def predict_proba_topl_fast(self, MP, l, coupling_method, batch_size=None):
         """
         Better optimized version of predict_proba_topl
         Combines outputs of constituent classifiers using only those classes, which are among the top l most probable
@@ -457,7 +457,7 @@ class WeightedLinearEnsemble:
                 # DPS now should contain pairwise probabilities
                 DPS = DPS + DPSt
 
-                pcPS = PWComb(DPS)
+                pcPS = coupling_method(DPS)
 
                 # resulting posteriors for samples with pc picked classes
                 ps_cur = torch.zeros(pcn, k, device=self.dev_, dtype=self.dtp_)
