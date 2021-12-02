@@ -4,10 +4,11 @@ import numpy as np
 import functools
 from weensembles.predictions_evaluation import compute_acc_topk
 from weensembles.WeightedLinearEnsemble import WeightedLinearEnsemble
+from weensembles.CombiningMethods import logreg
 
 
-def ensemble_general_test(data_train_path, data_test_path, targets, order, output_folder, output_model_fold, comb_methods,
-                          models_load_file=None, combining_topl=5, testing_topk=1, save_coefs=False, verbose=False,
+def ensemble_general_test(data_train_path, data_test_path, targets, order, output_folder, output_model_fold, coupling_methods,
+                          models_load_file=None, combining_topl=5, testing_topk=1, save_coefs=False, verbose=0,
                           test_normality=False, save_pvals=False, fit_on_penultimate=False, double_precision=False):
     """
     Trains a combiner on provided networks outputs - data_train_path (or loads models if models_load_file is provided)
@@ -80,10 +81,7 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
 
         WE = WeightedLinearEnsemble(c=c, k=k, device=device, dtp=dtype)
 
-        if not fit_on_penultimate:
-            WE.fit(tcs, tar, verbose, test_normality)
-        else:
-            WE.fit_penultimate(tcs, tar, verbose, test_normality)
+        WE.fit(MP=tcs, tar=tar, combining_method=logreg, verbose=verbose, test_normality=test_normality, penultimate=fit_on_penultimate)
         WE.save(os.path.join(output_model_fold, models_file))
         if save_pvals:
             WE.save_pvals(os.path.join(output_folder, "p_values.npy"))
@@ -94,7 +92,7 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
         k = WE.k_
 
     if save_coefs:
-        WE.save_coefs_csv(os.path.join(output_model_fold, "lda_coefs.csv"))
+        WE.save_coefs_csv(os.path.join(output_model_fold, "linear_coefs.csv"))
 
     print("Working with topl: " + str(combining_topl) + " and topk: " + str(testing_topk))
 
@@ -117,8 +115,8 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
             print("Accuracy of test input (topk " + str(testing_topk) + ") " + str(npy_files_test[nni]) + ": " + str(acci))
 
     with torch.no_grad():
-        for cm in comb_methods:
-            print("Testing combining method " + cm.__name__)
+        for cp_m in coupling_methods:
+            print("Testing coupling method " + cp_m.__name__)
             if combining_topl > 0:
                 fin = False
                 tries = 0
@@ -128,7 +126,7 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
                         torch.cuda.empty_cache()
                         print('Trying again, try {}, batch size {}'.format(tries, cur_n))
                     try:
-                        PPtl = WE.predict_proba_topl_fast(tcs_test, combining_topl, cm, batch_size=cur_n)
+                        PPtl = WE.predict_proba_topl_fast(tcs_test, combining_topl, cp_m, batch_size=cur_n)
                         fin = True
                     except RuntimeError as rerr:
                         if 'memory' not in str(rerr):
@@ -143,9 +141,9 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
                     return -1
 
             else:
-                PPtl = WE.predict_proba(tcs_test, cm)
+                PPtl = WE.predict_proba(tcs_test, cp_m)
 
-            np.save(os.path.join(output_folder, "prob_" + cm.__name__), PPtl.cpu())
+            np.save(os.path.join(output_folder, "prob_" + cp_m.__name__), PPtl.cpu())
             if has_test_tar:
                 acc = compute_acc_topk(tar_test.to(device=device, dtype=dtype), PPtl, testing_topk)
                 print("Accuracy of model: " + str(acc))
