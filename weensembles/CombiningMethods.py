@@ -51,7 +51,7 @@ def _logreg_sweep_C(X, y, val_X, val_y, fit_intercept=False, verbose=0):
 
 
 @torch.no_grad()
-def lda(X, y, verbosity=0):
+def lda(X, y, verbose=0):
     clf = LinearDiscriminantAnalysis(solver='lsqr')
     clf.fit(X.cpu(), y.cpu())
     
@@ -61,7 +61,7 @@ setattr(lda, "req_val", False)
 
 
 @torch.no_grad()
-def logreg(X, y, verbosity=0):
+def logreg(X, y, verbose=0):
     clf = LogisticRegression()
     clf.fit(X.cpu(), y.cpu())
     return clf
@@ -70,7 +70,7 @@ setattr(logreg, "req_val", False)
 
 
 @torch.no_grad()
-def logreg_no_interc(X, y, verbosity=0):
+def logreg_no_interc(X, y, verbose=0):
     clf = LogisticRegression(fit_intercept=False)
     clf.fit(X.cpu(), y.cpu())
     return clf
@@ -79,16 +79,30 @@ setattr(logreg_no_interc, "req_val", False)
 
 
 @torch.no_grad()
-def logreg_sweep_C(X, y, val_X, val_y, verbosity=0):
-    clf = _logreg_sweep_C(X, y, val_X=val_X, val_y=val_y, fit_intercept=True, verbose=verbosity)
+def logreg_sweep_C(X, y, val_X, val_y, verbose=0):
+    clf = _logreg_sweep_C(X, y, val_X=val_X, val_y=val_y, fit_intercept=True, verbose=verbose)
     return clf
 
 setattr(logreg_sweep_C, "req_val", True)
 
     
 @torch.no_grad()
-def logreg_no_interc_sweep_C(X, y, val_X, val_y, verbosity=0):
-    clf = _logreg_sweep_C(X, y, val_X=val_X, val_y=val_y, fit_intercept=False, verbose=verbosity)
+def logreg_no_interc_sweep_C(X, y, val_X, val_y, verbose=0):
+    clf = _logreg_sweep_C(X, y, val_X=val_X, val_y=val_y, fit_intercept=False, verbose=verbose)
     return clf
 
 setattr(logreg_no_interc_sweep_C, "req_val", True)
+
+
+comb_methods = {"lda": lda,
+                "logreg": logreg,
+                "logreg_no_interc": logreg_no_interc,
+                "logreg_sweep_C": logreg_sweep_C,
+                "logreg_no_interc_sweep_C": logreg_no_interc_sweep_C}
+
+
+def comb_picker(co_m):
+    if co_m not in comb_methods:
+        return None 
+    
+    return comb_methods[co_m]

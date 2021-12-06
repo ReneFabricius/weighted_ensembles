@@ -81,7 +81,7 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
 
         WE = WeightedLinearEnsemble(c=c, k=k, device=device, dtp=dtype)
 
-        WE.fit(MP=tcs, tar=tar, combining_method=logreg, verbose=verbose, test_normality=test_normality, penultimate=fit_on_penultimate)
+        WE.fit(MP=tcs, tar=tar, comb_m="logreg", verbose=verbose, test_normality=test_normality, penultimate=fit_on_penultimate)
         WE.save(os.path.join(output_model_fold, models_file))
         if save_pvals:
             WE.save_pvals(os.path.join(output_folder, "p_values.npy"))
@@ -116,7 +116,7 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
 
     with torch.no_grad():
         for cp_m in coupling_methods:
-            print("Testing coupling method " + cp_m.__name__)
+            print("Testing coupling method " + cp_m)
             if combining_topl > 0:
                 fin = False
                 tries = 0
@@ -143,7 +143,7 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
             else:
                 PPtl = WE.predict_proba(tcs_test, cp_m)
 
-            np.save(os.path.join(output_folder, "prob_" + cp_m.__name__), PPtl.cpu())
+            np.save(os.path.join(output_folder, "prob_" + cp_m), PPtl.cpu())
             if has_test_tar:
                 acc = compute_acc_topk(tar_test.to(device=device, dtype=dtype), PPtl, testing_topk)
                 print("Accuracy of model: " + str(acc))
@@ -217,14 +217,14 @@ def test_averaging_combination(data_test_path, targets, order, output_folder, co
                 acci))
 
     with torch.no_grad():
-        for cm in comb_methods:
-            print("Testing combining method " + cm.__name__)
+        for co_m in comb_methods:
+            print("Testing combining method " + co_m)
             if combining_topl > 0:
-                PPtl = WE.predict_proba_topl_fast(tcs_test, combining_topl, cm)
+                PPtl = WE.predict_proba_topl_fast(tcs_test, combining_topl, co_m)
             else:
-                PPtl = WE.predict_proba(tcs_test, cm)
+                PPtl = WE.predict_proba(tcs_test, co_m)
 
-            np.save(os.path.join(output_folder, "prob_" + cm.__name__), PPtl.cpu())
+            np.save(os.path.join(output_folder, "prob_" + co_m), PPtl.cpu())
             if has_test_tar:
                 acc = compute_acc_topk(tar_test.to(device=device, dtype=dtype), PPtl, testing_topk)
                 print("Accuracy of model: " + str(acc))

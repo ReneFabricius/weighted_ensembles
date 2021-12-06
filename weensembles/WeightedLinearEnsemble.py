@@ -5,6 +5,8 @@ import pandas as pd
 from scipy.stats import normaltest
 from timeit import default_timer as timer
 
+from weensembles.CouplingMethods import coup_picker
+from weensembles.CombiningMethods import comb_picker
 from weensembles.utils import logit, pairwise_accuracies, pairwise_accuracies_penultimate
 
 
@@ -46,9 +48,14 @@ class WeightedLinearEnsemble:
 
         print("Starting fit")
         start = timer()
-        inc_val = combining_method.req_val
+        comb_m = comb_picker(combining_method)
+        if comb_m is None:
+            print("Unknown combining method {} selected".format(combining_method))
+            return 1
+        
+        inc_val = comb_m.req_val
         if inc_val and (MP_val is None or tar_val is None):
-            print("MP_val and tar_val are required for combining method {}".format(combining_method.__name__))
+            print("MP_val and tar_val are required for combining method {}".format(comb_m.__name__))
             return 1
         
         num = self.k_ * (self.k_ - 1) // 2      # Number of pairs of classes
@@ -135,9 +142,9 @@ class WeightedLinearEnsemble:
                         print(str(sc_pval))
 
                 if inc_val:
-                    clf = combining_method(X=X, y=y, val_X=X_val, val_y=y_val, verbosity=verbose)
+                    clf = comb_m(X=X, y=y, val_X=X_val, val_y=y_val, verbose=verbose)
                 else:
-                    clf = combining_method(X=X, y=y, verbosity=verbose)
+                    clf = comb_m(X=X, y=y, verbose=verbose)
                     
                 self.cls_models_[fc][sc] = clf
                 self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
@@ -166,18 +173,24 @@ class WeightedLinearEnsemble:
         return 0
     
     @torch.no_grad()
-    def predict_proba(self, MP, coupling_method, debug_pwcm=False, output_R=False, batch_size=None):
+    def predict_proba(self, MP, coupling_method, verbose=0, output_R=False, batch_size=None):
         """
         Combines outputs of constituent classifiers using all classes.
         :param batch_size: batch size for coupling method, default None - single batch
         :param output_R: whether to output as a second return the R matrices which enter into coupling method
-        :param debug_pwcm: whether to print detailed outputs from coupling method
+        :param verbosity: Level of detailed output.
         :param MP: c x n x k tensor of constituent classifiers posteriors
         c - number of constituent classifiers, n - number of training samples, k - number of classes
-        :param PWComb: coupling method to use
+        :param coupling_method: coupling method to use
         :return: n x k tensor of combined posteriors
         """
-        print("Starting predict proba, pwc method {}".format(coupling_method.__name__))
+        coup_m = coup_picker(coupling_method)
+        if coup_m is None:
+            print("Unknown coupling method {} selected".format(coupling_method))
+            return 1
+        
+        if verbose > 0:
+            print("Starting predict proba, coupling method {}".format(coup_m.__name__))
         if self.trained_on_penultimate_ is None:
             print("Ensemble not trained")
             return
@@ -215,14 +228,15 @@ class WeightedLinearEnsemble:
                 p_probs[:, fc, sc] = torch.from_numpy(PP[:, 1])
 
         end = timer()
-        print("Predict proba finished in " + str(end - start) + " s")
+        if verbose > 0:
+            print("Predict proba finished in " + str(end - start) + " s")
 
         R_dev_dtp = p_probs.to(device=self.dev_, dtype=self.dtp_)
 
         b_size = batch_size if batch_size is not None else n
         prob_batches = []
         for start_ind in range(0, n, b_size):
-            batch_probs = coupling_method(R_dev_dtp[start_ind:(start_ind + b_size), :, :], verbose=debug_pwcm)
+            batch_probs = coup_m(R_dev_dtp[start_ind:(start_ind + b_size), :, :], verbose=verbose)
             prob_batches.append(batch_probs)
 
         probs = torch.cat(prob_batches, dim=0)
@@ -258,17 +272,23 @@ class WeightedLinearEnsemble:
                 print("\tcombined accuracy: " + str(self.cls_models_[fc][sc].score(X, y)))
 
     @torch.no_grad()
-    def predict_proba_topl(self, MP, l, coupling_method):
+    def predict_proba_topl(self, MP, l, coupling_method, verbose=0):
         """
         Combines outputs of constituent classifiers using only those classes, which are among the top l most probable
         for some constituent classifier.
         :param MP: MP: c x n x k tensor of constituent classifiers posteriors
         c - number of constituent classifiers, n - number of training samples, k - number of classes
         :param l: how many most probable classes for each constituent classifier to consider
-        :param PWComb: coupling method to use
+        :param coupling_method: coupling method to use
+        :param verbosity: Level of detail in printed output.
         :return: n x k tensor of combined posteriors
         """
-        print("Starting predict proba topl")
+        coup_m = coup_picker(coupling_method)
+        if coup_m is None:
+            print("Unknown coupling method {} selected".format(coupling_method))
+            return 1
+        if verbose > 0:
+            print("Starting predict proba topl")
         if self.trained_on_penultimate_ is None:
             print("Ensemble not trained")
             return
@@ -288,7 +308,7 @@ class WeightedLinearEnsemble:
         # Every sample may have different set of top classes, so we process them one by one
         print_step = n // 100
         for ni in range(n):
-            if ni % print_step == 0:
+            if verbose > 0 and ni % print_step == 0:
                 print("Predicting proba topl progress " + str(ni//print_step) + "%", end="\r")
 
             val, ind = torch.topk(MP[:, ni, :], l, dim=1)
@@ -311,16 +331,17 @@ class WeightedLinearEnsemble:
                     p_probs[:, fci + 1 + sci, fci] = torch.from_numpy(PP[:, 0])
                     p_probs[:, fci, fci + 1 + sci] = torch.from_numpy(PP[:, 1])
 
-            sam_ps = coupling_method(p_probs.to(device=self.dev_, dtype=self.dtp_))
+            sam_ps = coup_m(p_probs.to(device=self.dev_, dtype=self.dtp_), verbose=verbose)
             ps[ni, Ti] = sam_ps.squeeze()
 
         end = timer()
-        print("Predict proba topl finished in " + str(end - start) + " s")
+        if verbose > 0:
+            print("Predict proba topl finished in " + str(end - start) + " s")
 
         return ps
 
     @torch.no_grad()
-    def predict_proba_topl_fast(self, MP, l, coupling_method, batch_size=None):
+    def predict_proba_topl_fast(self, MP, l, coupling_method, batch_size=None, verbose=0):
         """
         Better optimized version of predict_proba_topl
         Combines outputs of constituent classifiers using only those classes, which are among the top l most probable
@@ -328,11 +349,17 @@ class WeightedLinearEnsemble:
         :param MP: MP: c x n x k tensor of constituent classifiers posteriors
         c - number of constituent classifiers, n - number of training samples, k - number of classes
         :param l: how many most probable classes for each constituent classifier to consider
-        :param PWComb: coupling method to use
+        :param coupling_method: coupling method to use
         :param batch_size: if not none, the size of the batches to use
         :return: n x k tensor of combined posteriors
         """
-        print("Starting predict proba topl fast")
+        if verbose > 0:
+            print("Starting predict proba topl fast")
+        coup_m = coup_picker(coupling_method)
+        if coup_m is None:
+            print("Unknown coupling method {} selected".format(coupling_method))
+            return 1
+ 
         if self.trained_on_penultimate_ is None:
             print("Ensemble not trained")
             return
@@ -457,7 +484,7 @@ class WeightedLinearEnsemble:
                 # DPS now should contain pairwise probabilities
                 DPS = DPS + DPSt
 
-                pcPS = coupling_method(DPS)
+                pcPS = coup_m(DPS, verbose=verbose)
 
                 # resulting posteriors for samples with pc picked classes
                 ps_cur = torch.zeros(pcn, k, device=self.dev_, dtype=self.dtp_)
@@ -470,7 +497,8 @@ class WeightedLinearEnsemble:
 
         ps_full = torch.cat(ps_list, dim=0)
         end = timer()
-        print("Predict proba topl fast finished in " + str(end - start) + " s")
+        if verbose > 0:
+            print("Predict proba topl fast finished in " + str(end - start) + " s")
 
         return ps_full
 

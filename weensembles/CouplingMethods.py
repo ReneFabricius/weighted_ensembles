@@ -206,3 +206,14 @@ def bc(PP, verbose=False):
     print("Method bc finished in {:.4f} s".format(end - start))
 
     return ps.T
+
+coup_methods = {"m1": m1,
+                "m2": m2,
+                "bc": bc,
+                "m2_iter": m2_iter}
+
+def coup_picker(co_m):
+    if co_m not in coup_methods:
+        return None 
+    
+    return coup_methods[co_m]
