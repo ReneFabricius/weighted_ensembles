@@ -97,7 +97,7 @@ def _comp_ece(bin_n, bins, top_probs, cor_pred, p_norm=2):
 
 
 @torch.no_grad()
-def ECE_sweep(prob_pred, tar, p_norm=2, penultimate=False):
+def ECE_sweep(pred, tar, p_norm=2, penultimate=False):
     """
     Computes estimate of calibration error according to equal mass monotonic sweep algorithm.
     As per https://arxiv.org/abs/2012.08668v2
@@ -106,11 +106,11 @@ def ECE_sweep(prob_pred, tar, p_norm=2, penultimate=False):
     :param penultimate: If True, applies softmax before computations.
     :return: Estimate of calibration error.
     """
-    n, k = prob_pred.shape
-    dev = prob_pred.device
+    n, k = pred.shape
+    dev = pred.device
     if penultimate:
-        prob_pred = torch.nn.Softmax(dim=1)(prob_pred)
-    top_probs, top_inds = torch.topk(input=prob_pred, k=1, dim=1)
+        pred = torch.nn.Softmax(dim=1)(pred)
+    top_probs, top_inds = torch.topk(input=pred, k=1, dim=1)
     top_probs = top_probs.squeeze()
     top_inds = top_inds.squeeze()
     cor_pred = top_inds == tar

@@ -89,7 +89,7 @@ class TemperatureScaling(CalibrationMethod):
         if verbose:
             cal_pred = self.predict_proba(logit_pred, self.temp_)
             cur_loss = self._nll_loss(temp=self.temp_, logit_pred=logit_pred, tar=tar).item()
-            cur_ece = ECE_sweep(prob_pred=cal_pred, tar=tar)
+            cur_ece = ECE_sweep(pred=cal_pred, tar=tar)
             print("Strating fit. NLL: {:.4f}, estimated calibration error: {:.4f}".format(cur_loss, cur_ece))
 
         opt = minimize(
@@ -105,7 +105,7 @@ class TemperatureScaling(CalibrationMethod):
         if verbose:
             cal_pred = self.predict_proba(logit_pred, self.temp_)
             cur_loss = self._nll_loss(temp=self.temp_, logit_pred=logit_pred, tar=tar).item()
-            cur_ece = ECE_sweep(prob_pred=cal_pred, tar=tar)
+            cur_ece = ECE_sweep(pred=cal_pred, tar=tar)
             print("Fit finished in {:.4f}s. NLL: {:.4f}, estimated calibration error: {:.4f}".format(end - start, cur_loss, cur_ece))
 
         return 0
