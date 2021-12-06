@@ -75,7 +75,7 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
 
         # Compute accuracies of individual networks on training data
         for nni in range(c):
-            acci = compute_acc_topk(tar.to(device=device, dtype=dtype), tcs[nni].to(device=device, dtype=dtype), testing_topk)
+            acci = compute_acc_topk(tar=tar.to(device=device, dtype=dtype), pred=tcs[nni].to(device=device, dtype=dtype), k=testing_topk)
             print("Accuracy of train input (topk " + str(testing_topk) + ") " + str(npy_files_train[nni]) +
                   ": " + str(acci))
 
@@ -110,8 +110,8 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
 
         # Compute accuracies of individual networks on testing data
         for nni in range(c):
-            acci = compute_acc_topk(tar_test.to(device=device, dtype=dtype),
-                                    tcs_test[nni].to(device=device, dtype=dtype), testing_topk)
+            acci = compute_acc_topk(tar=tar_test.to(device=device, dtype=dtype),
+                                    pred=tcs_test[nni].to(device=device, dtype=dtype), k=testing_topk)
             print("Accuracy of test input (topk " + str(testing_topk) + ") " + str(npy_files_test[nni]) + ": " + str(acci))
 
     with torch.no_grad():
@@ -145,7 +145,7 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
 
             np.save(os.path.join(output_folder, "prob_" + cp_m), PPtl.cpu())
             if has_test_tar:
-                acc = compute_acc_topk(tar_test.to(device=device, dtype=dtype), PPtl, testing_topk)
+                acc = compute_acc_topk(tar=tar_test.to(device=device, dtype=dtype), pred=PPtl, k=testing_topk)
                 print("Accuracy of model: " + str(acc))
 
     return 0
@@ -211,8 +211,8 @@ def test_averaging_combination(data_test_path, targets, order, output_folder, co
 
         # Compute accuracies of individual networks on testing data
         for nni in range(c):
-            acci = compute_acc_topk(tar_test.to(device=device, dtype=dtype),
-                                    tcs_test[nni].to(device=device, dtype=dtype), testing_topk)
+            acci = compute_acc_topk(tar=tar_test.to(device=device, dtype=dtype),
+                                    pred=tcs_test[nni].to(device=device, dtype=dtype), k=testing_topk)
             print("Accuracy of test input (topk " + str(testing_topk) + ") " + str(npy_files_test[nni]) + ": " + str(
                 acci))
 
@@ -226,7 +226,7 @@ def test_averaging_combination(data_test_path, targets, order, output_folder, co
 
             np.save(os.path.join(output_folder, "prob_" + co_m), PPtl.cpu())
             if has_test_tar:
-                acc = compute_acc_topk(tar_test.to(device=device, dtype=dtype), PPtl, testing_topk)
+                acc = compute_acc_topk(tar=tar_test.to(device=device, dtype=dtype), pred=PPtl, k=testing_topk)
                 print("Accuracy of model: " + str(acc))
 
     return 0

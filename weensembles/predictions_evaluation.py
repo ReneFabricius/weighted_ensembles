@@ -54,27 +54,27 @@ def get_correctness_masks(MP, tar, topk):
 
 
 @torch.no_grad()
-def compute_acc_topk(y_cor, ps, l):
-    top_v, top_i = torch.topk(ps, l, dim=1)
-    n = y_cor.size()[0]
+def compute_acc_topk(pred, tar, k):
+    top_v, top_i = torch.topk(pred, k, dim=1)
+    n = tar.size()[0]
 
-    return torch.sum(top_i == y_cor.unsqueeze(1)).item() / n
+    return torch.sum(top_i == tar.unsqueeze(1)).item() / n
 
 
 @torch.no_grad()
-def compute_nll(y_cor, ps, penultimate=False):
+def compute_nll(pred, tar, penultimate=False):
     if penultimate:
         lsf = torch.nn.LogSoftmax(dim=1)
-        ps_thr = lsf(ps)
+        ps_thr = lsf(pred)
     else:
         # min_prob = (1e-16 if ps.dtype == torch.float64 else 1e-7)
         min_prob = 1e-7
         thr = torch.nn.Threshold(min_prob, min_prob)
-        ps_thr = thr(ps)
+        ps_thr = thr(pred)
         ps_thr.log_()
 
     nll = torch.nn.NLLLoss(reduction='sum')
-    return nll(ps_thr, y_cor).item()
+    return nll(ps_thr, tar).item()
 
 
 @torch.no_grad()
