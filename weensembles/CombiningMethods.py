@@ -35,7 +35,7 @@ def _logreg_sweep_C(X, y, val_X, val_y, fit_intercept=False, verbose=0):
     for C_val in C_vals:
         if verbose > 0:
             print("Testing C value {}".format(C_val))
-        clf = LogisticRegression(penalty='l2', fit_intercept=fit_intercept, verbose=verbose - 1, C=C_val)
+        clf = LogisticRegression(penalty='l2', fit_intercept=fit_intercept, verbose=max(verbose - 1, 0), C=C_val)
         clf.fit(X.cpu(), y.cpu())
         cur_acc = clf.score(val_X.cpu(), val_y.cpu())
         if verbose > 0:
