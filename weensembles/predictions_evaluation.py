@@ -1,3 +1,4 @@
+from tkinter.constants import N
 import torch
 
 
@@ -134,3 +135,24 @@ def ECE_sweep(pred, tar, p_norm=2, penultimate=False):
                 return ece
 
     return last_ece
+
+
+@torch.no_grad()
+def compute_error_inconsistency(preds, tar, k=1):
+    """
+    Computes error inconsistency of provided classifications.
+    Error inconsistency is the portion of the data, where some of the classifiers are correct, but not all of them.
+    Args:
+        preds (torch.tensor): Predictions. Tensor of shape c×n×k with c classifiers, n samples and k classes.
+        tar (torch.tensor): Tensor with correct labels.
+        k (int, optional): Correctness of classifier is evaluated in topk manner,
+        meaning the classifier is correct if the correct class is among the k most probable predicted classes. Defaults to 1.
+    Returns:
+        float: Error inconsistency ratio.
+    """
+    c, n, k = preds.shape
+    _, top_i = torch.topk(preds, k=k, dim=-1)
+    correctness = torch.sum(top_i == tar.unsqueeze(1), dim=-1)
+    num_cor = torch.sum(correctness, dim=0)
+    err_inc = (torch.sum(num_cor > 0) - torch.sum(num_cor == c)) / n
+    return err_inc.item()
