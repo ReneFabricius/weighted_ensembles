@@ -3,7 +3,7 @@ from timeit import default_timer as timer
 
 
 @torch.no_grad()
-def m1(PP, verbose=False):
+def m1(PP, verbose=0):
     """
     Method one of Wu, Lin and Weng.
 
@@ -16,9 +16,10 @@ def m1(PP, verbose=False):
     dtype = PP.dtype
     n, k, kk = PP.size()
     assert k == kk
-    if verbose:
+    if verbose > 1:
         print("Working with {} samples, each with {} classes".format(n, k))
-        print("Solving for pairwise probabilities\n{}".format(PP.cpu().numpy()))
+        if verbose > 2:
+            print("Solving for pairwise probabilities\n{}".format(PP.cpu().numpy()))
 
     E = torch.eye(k, device=device, dtype=dtype)
     Es = E.unsqueeze(0).expand(n, k, k)
@@ -28,24 +29,25 @@ def m1(PP, verbose=False):
     A = (PP.sum(dim=2).diag_embed() + PP) / (k - 1) - Es
     A[:, k - 1, :] = 1
 
-    if verbose:
+    if verbose > 2:
         print("Solving linear system\n{}\n× x =\n{}".format(A.cpu().numpy(), B.cpu().numpy()))
 
     Xs = torch.linalg.solve(A, B)
     
     ps = Xs[:, 0:k, 0:1].squeeze(2)
 
-    if verbose:
+    if verbose > 2:
         print("Resulting probabilities\n{}".format(ps.cpu().numpy()))
 
     end = timer()
-    print("Method m1 finished in {:.4f} s".format(end - start))
+    if verbose > 0:
+        print("Method m1 finished in {:.4f} s".format(end - start))
 
     return ps
 
 
 @torch.no_grad()
-def m2(PP, verbose=False):
+def m2(PP, verbose=0):
     """
     Method two of Wu, Lin and Weng.
 
@@ -65,29 +67,30 @@ def m2(PP, verbose=False):
     B[:, k, :] = 1
 
     Q = (PP * PP).sum(dim=1).diag_embed() - PP * PP.transpose(1, 2)
-    if verbose:
+    if verbose > 2:
         print("Matrix Q:\n{}".format(Q.cpu().numpy()))
 
     A = torch.cat((Q, es), 2)
     A = torch.cat((A, torch.cat((es.transpose(1, 2), zs), 2)), 1)
 
-    if verbose:
+    if verbose > 2:
         print("Solving linear system\n{}\n× x =\n{}".format(A.cpu().numpy(), B.cpu().numpy()))
 
     Xs = torch.linalg.solve(A, B)
     ps = Xs[:, 0:k, 0:1].squeeze(2)
 
-    if verbose:
+    if verbose > 2:
         print("Resulting probabilities\n{}".format(ps.cpu().numpy()))
 
     end = timer()
-    print("Method m2 finished in {:.4f} s".format(end - start))
+    if verbose > 0:
+        print("Method m2 finished in {:.4f} s".format(end - start))
 
     return ps
 
 
 @torch.no_grad()
-def m2_iter(PP, verbose=False):
+def m2_iter(PP, verbose=0):
     """
     Method two, iterative implementation of Wu, Lin and Weng.
 
@@ -116,7 +119,7 @@ def m2_iter(PP, verbose=False):
 
     Q = (PP * PP).sum(dim=1).diag_embed() - PP * PP.transpose(1, 2)
 
-    if verbose:
+    if verbose > 2:
         print("Matrix Q:\n{}".format(Q.cpu().numpy()))
 
     p = torch.ones(n, k, 1, device=device, dtype=dtype) / k
@@ -127,14 +130,14 @@ def m2_iter(PP, verbose=False):
 
         max_err = torch.max(torch.abs(Qp - pQp)).item()
 
-        if verbose:
+        if verbose > 2:
             print("Iteration {}".format(it))
             print("Probability vector:\n{}".format(p.cpu().numpy()))
             print("Qp:\n{}\npQp: {}".format(Qp.cpu().numpy(), pQp.cpu().numpy()))
             print("Maximum error: {}".format(max_err))
 
         if max_err < eps:
-            if verbose:
+            if verbose > 1:
                 print("Exiting in iteration {}".format(it))
             break
 
@@ -146,13 +149,14 @@ def m2_iter(PP, verbose=False):
             p = p / (1 + diff)
 
     end = timer()
-    print("Method m2_iter finished in {:.4f} s".format(end - start))
+    if verbose > 0:
+        print("Method m2_iter finished in {:.4f} s".format(end - start))
 
     return p.squeeze(2)
 
 
 @torch.no_grad()
-def bc(PP, verbose=False):
+def bc(PP, verbose=0):
     """
     Bayes covariant method of Such and Barreda.
 
@@ -185,7 +189,7 @@ def bc(PP, verbose=False):
 
     MMiM = torch.matmul(MMi, M.T)
 
-    if verbose:
+    if verbose > 2:
         print("Matrix MMiM:\n{}".format(MMiM.cpu().numpy()))
 
     rv = PP[:, torch.triu(torch.ones(k, k, device=device, dtype=dtype), 1) == 1].T
@@ -195,7 +199,7 @@ def bc(PP, verbose=False):
     s = torch.log(1 / rv - 1)
     u = torch.matmul(MMiM, s)
 
-    if verbose:
+    if verbose > 2:
         print("Vector s:\n{}\nVector u:\n{}".format(s.cpu().numpy(), u.cpu().numpy()))
 
     zs = torch.zeros(1, n, device=device, dtype=dtype)
@@ -203,7 +207,8 @@ def bc(PP, verbose=False):
     ps = u_exp / torch.sum(u_exp, dim=0)
 
     end = timer()
-    print("Method bc finished in {:.4f} s".format(end - start))
+    if verbose > 0:    
+        print("Method bc finished in {:.4f} s".format(end - start))
 
     return ps.T
 

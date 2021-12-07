@@ -30,7 +30,7 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
     enter zero to combine all classes
     :param testing_topk: number of top classes which will be considered in accuracy computation
     :param save_coefs: save coefficients as text
-    :param verbose:
+    :param verbose: Level of verbosity
     :return:
     """
     extension = '.npy'

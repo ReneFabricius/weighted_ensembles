@@ -2,6 +2,7 @@ import torch
 from timeit import default_timer as timer
 from sklearn.linear_model import LogisticRegression
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+import numpy as np
 
 
 @torch.no_grad()

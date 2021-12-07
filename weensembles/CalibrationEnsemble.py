@@ -18,7 +18,7 @@ class CalibrationEnsemble:
         self.cal_models_ = [None for _ in range(c)]
 
     @torch.no_grad()
-    def fit(self, MP, tar, calibration_method, verbose=False):
+    def fit(self, MP, tar, calibration_method, verbose=0):
         """
         Fit the calibration model for each combined classifier.
         :param MP: Predictions from penultimate layer or logits.

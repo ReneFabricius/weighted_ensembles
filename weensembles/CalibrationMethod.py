@@ -55,7 +55,6 @@ class TemperatureScaling(CalibrationMethod):
         self.dev_ = device
         self.dtp_ = dtp
 
-    @torch.no_grad()
     def _nll_loss(self, temp, logit_pred, tar):
         """
         Computes nll loss for given temperature and data.
@@ -72,7 +71,7 @@ class TemperatureScaling(CalibrationMethod):
         return loss
 
     @torch.no_grad()
-    def fit(self, logit_pred, tar, verbose=False, solver="BFGS"):
+    def fit(self, logit_pred, tar, verbose=0, solver="BFGS"):
         """
         Fits model to provided data.
         :param solver: Solver to use for optimization.
@@ -86,7 +85,7 @@ class TemperatureScaling(CalibrationMethod):
 
         n, k = logit_pred.shape
 
-        if verbose:
+        if verbose > 1:
             cal_pred = self.predict_proba(logit_pred, self.temp_)
             cur_loss = self._nll_loss(temp=self.temp_, logit_pred=logit_pred, tar=tar).item()
             cur_ece = ECE_sweep(pred=cal_pred, tar=tar)
@@ -97,12 +96,12 @@ class TemperatureScaling(CalibrationMethod):
             x0=self.temp_,
             max_iter= self.max_iter_,
             method=solver,
-            disp=2 if verbose else 0)
+            disp=verbose)
         self.temp_ = opt.x
 
         end = timer()
 
-        if verbose:
+        if verbose > 1:
             cal_pred = self.predict_proba(logit_pred, self.temp_)
             cur_loss = self._nll_loss(temp=self.temp_, logit_pred=logit_pred, tar=tar).item()
             cur_ece = ECE_sweep(pred=cal_pred, tar=tar)
