@@ -137,7 +137,7 @@ def ECE_sweep(pred, tar, p_norm=2, penultimate=False):
 
 
 @torch.no_grad()
-def compute_error_inconsistency(preds, tar, k=1):
+def compute_error_inconsistency(preds, tar, topk=1):
     """
     Computes error inconsistency of provided classifications.
     Error inconsistency is the portion of the data, where some of the classifiers are correct, but not all of them.
@@ -150,7 +150,7 @@ def compute_error_inconsistency(preds, tar, k=1):
         float: Error inconsistency ratio.
     """
     c, n, k = preds.shape
-    _, top_i = torch.topk(preds, k=k, dim=-1)
+    _, top_i = torch.topk(preds, k=topk, dim=-1)
     correctness = torch.sum(top_i == tar.unsqueeze(1), dim=-1)
     num_cor = torch.sum(correctness, dim=0)
     err_inc = (torch.sum(num_cor > 0) - torch.sum(num_cor == c)) / n
