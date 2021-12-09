@@ -72,25 +72,27 @@ class CalibrationEnsemble:
         return prob
 
     @torch.no_grad()
-    def save(self, file):
+    def save(self, file, verbose=0):
         """
         Save ensemble into a file.
         :param file: file to save the ensemble to
         :return:
         """
-        print("Saving models into file: " + str(file))
+        if verbose > 0:
+            print("Saving models into file: " + str(file))
         dump_dict = {"models": self.cal_models_, "c": self.c_, "k": self.k_}
         with open(file, 'wb') as f:
             pickle.dump(dump_dict, f)
 
     @torch.no_grad()
-    def load(self, file):
+    def load(self, file, verbose=0):
         """
         Load ensemble from a file
         :param file: file to load the ensemble from
         :return:
         """
-        print("Loading models from file: " + str(file))
+        if verbose > 0:
+            print("Loading models from file: " + str(file))
         with open(file, 'rb') as f:
             dump_dict = pickle.load(f)
             if dump_dict["c"] != len(dump_dict["models"]):
