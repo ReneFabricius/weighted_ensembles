@@ -212,10 +212,55 @@ def bc(PP, verbose=0):
 
     return ps.T
 
+
+@torch.no_grad()
+def sbt(PP, verbose=0):
+    """
+    Coupling method of Such, Benus and Tinajova.
+
+    :param PP: n×k×k tensor of matrices of pairwise probabilities
+    :param verbose: print detailed output
+    :return: n×k tensor of probability vectors
+    """
+    start = timer()
+    n, k, kk = PP.shape
+    assert(k == kk)
+    if verbose > 1:
+        print("Working with {} samples, each with {} classes".format(n, k))
+        if verbose > 2:
+            print("Solving for pairwise probabilities\n{}".format(PP.cpu().numpy()))
+
+    dtp = PP.dtype
+    dev = PP.device
+    ey = torch.eye(k, dtype=dtp, device=dev)
+    R_zd = PP * (1 - ey)
+    ND = torch.div(1, ey + R_zd.transpose(dim0=-2, dim1=-1)) - 1 + ey
+    DI = torch.diag_embed(torch.div(1, torch.sum(torch.div(1, R_zd + ey), dim=-1) - (k - 1)))
+    P = torch.matmul(ND, DI) - ey
+    P[:, k - 1, :] = 1
+    B = torch.zeros(n, k, 1, dtype=dtp, device=dev)
+    B[:, k - 1, :] = 1
+    if verbose > 2:
+        print("Solving linear system\n{}\n× x =\n{}".format(P.cpu().numpy(), B.cpu().numpy()))
+
+    X = torch.linalg.solve(P, B)
+    
+    end = timer()
+    if verbose > 2:
+        print("Resulting probabilities\n{}".format(X.squeeze(2).cpu().numpy()))
+
+    end = timer()
+    if verbose > 0:
+        print("Method sbt finished in {:.4f} s".format(end - start))
+
+    return X.squeeze(2)
+        
+
 coup_methods = {"m1": m1,
                 "m2": m2,
                 "bc": bc,
-                "m2_iter": m2_iter}
+                "m2_iter": m2_iter,
+                "sbt": sbt}
 
 def coup_picker(co_m):
     if co_m not in coup_methods:
