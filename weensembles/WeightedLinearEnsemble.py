@@ -503,25 +503,27 @@ class WeightedLinearEnsemble:
         return ps_full
 
     @torch.no_grad()
-    def save(self, file):
+    def save(self, file, verbose=0):
         """
         Save trained ensemble into a file.
         :param file: file to save the models to
         :return:
         """
-        print("Saving ensemble into file: " + str(file))
+        if verbose > 0:
+            print("Saving ensemble into file: " + str(file))
         dump_dict = {"models": self.cls_models_, "on_penult": self.trained_on_penultimate_}
         with open(file, 'wb') as f:
             pickle.dump(dump_dict, f)
 
     @torch.no_grad()
-    def load(self, file):
+    def load(self, file, verbose=0):
         """
         Load trained ensemble from a file.
         :param file: File to load the ensemble from.
         :return:
         """
-        print("Loading models from file: " + str(file))
+        if verbose > 0:
+            print("Loading models from file: " + str(file))
         with open(file, 'rb') as f:
             dump_dict = pickle.load(f)
             self.cls_models_ = dump_dict["models"]
