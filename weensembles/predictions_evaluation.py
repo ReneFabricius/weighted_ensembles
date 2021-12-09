@@ -147,11 +147,12 @@ def compute_error_inconsistency(preds, tar, topk=1):
         k (int, optional): Correctness of classifier is evaluated in topk manner,
         meaning the classifier is correct if the correct class is among the k most probable predicted classes. Defaults to 1.
     Returns:
-        float: Error inconsistency ratio.
+        float, float: Error inconsistency ratio and ratio of data where all models are correct.
     """
     c, n, k = preds.shape
     _, top_i = torch.topk(preds, k=topk, dim=-1)
     correctness = torch.sum(top_i == tar.unsqueeze(1), dim=-1)
     num_cor = torch.sum(correctness, dim=0)
-    err_inc = (torch.sum(num_cor > 0) - torch.sum(num_cor == c)) / n
-    return err_inc.item()
+    all_cor = torch.sum(num_cor == c)
+    err_inc = (torch.sum(num_cor > 0) - all_cor) / n
+    return err_inc.item(), all_cor.item() / n
