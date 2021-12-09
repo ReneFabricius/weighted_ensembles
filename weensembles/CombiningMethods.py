@@ -2,6 +2,8 @@ import torch
 from timeit import default_timer as timer
 from sklearn.linear_model import LogisticRegression
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.utils import check_array
+from scipy.special import expit
 import numpy as np
 
 
@@ -95,11 +97,46 @@ def logreg_no_interc_sweep_C(X, y, val_X, val_y, verbose=0):
 setattr(logreg_no_interc_sweep_C, "req_val", True)
 
 
+class Averager():
+    def __init__(self):
+        self.coef_ = None
+        self.intercept_ = None
+        self.penultimate_ = True
+    
+    def fit(self, X, y):
+        sn, c = X.shape
+        self.coef_ = np.full(shape=(1, c), fill_value=1.0 / c)
+        self.intercept_ = np.zeros(shape=(1))
+    
+    def decision_function(self, X):
+        X = check_array(X)
+        return np.mean(X, axis=1)
+    
+    def predict_proba(self, X):
+        prob = self.decision_function(X)
+        expit(prob, out=prob)
+        return np.vstack([1 - prob, prob]).T
+    
+    def score(self, X, y):
+        prob = self.predict_proba(X)
+        preds = np.argmax(prob, axis=1)
+        return np.sum(preds == y) / len(y)
+        
+        
+@torch.no_grad()
+def average(X, y, verbose=0):
+    clf = Averager()
+    clf.fit(X, y)
+    return clf
+
+setattr(average, "req_val", False)
+
 comb_methods = {"lda": lda,
                 "logreg": logreg,
                 "logreg_no_interc": logreg_no_interc,
                 "logreg_sweep_C": logreg_sweep_C,
-                "logreg_no_interc_sweep_C": logreg_no_interc_sweep_C}
+                "logreg_no_interc_sweep_C": logreg_no_interc_sweep_C,
+                "average": average}
 
 
 def comb_picker(co_m):
