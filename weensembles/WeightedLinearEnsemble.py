@@ -76,7 +76,7 @@ class WeightedLinearEnsemble:
                           performing softmax".format(num_non_one))
                     MP_val = self.softmax_supports(MP_val)
         
-        if combining_method.fit_pairwise:
+        if comb_m.fit_pairwise:
             pi = 0
             for fc in range(self.k_):
                 for sc in range(fc + 1, self.k_):
@@ -164,9 +164,9 @@ class WeightedLinearEnsemble:
 
         else:
             if inc_val:
-                clf = combining_method(X=MP, y=tar, val_X=MP_val, val_y=tar_val, verbose=verbose)
+                clf = comb_m(X=MP, y=tar, val_X=MP_val, val_y=tar_val, verbose=verbose)
             else:
-                clf = combining_method(X=MP, y=tar, verbose=verbose)
+                clf = comb_m(X=MP, y=tar, verbose=verbose)
             
             for fc in range(self.k_):
                 for sc in range(fc + 1, self.k_):
