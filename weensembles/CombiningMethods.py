@@ -6,6 +6,7 @@ from sklearn.utils import check_array
 from scipy.special import expit
 import numpy as np
 
+from weensembles.CalibrationMethod import TemperatureScaling
 
 @torch.no_grad()
 def _logreg_sweep_C(X, y, val_X, val_y, fit_intercept=False, verbose=0):
@@ -61,6 +62,7 @@ def lda(X, y, verbose=0):
     return clf
 
 setattr(lda, "req_val", False)
+setattr(lda, "fit_pairwise", True)
 
 
 @torch.no_grad()
@@ -70,7 +72,7 @@ def logreg(X, y, verbose=0):
     return clf
 
 setattr(logreg, "req_val", False)
-
+setattr(logreg, "fit_pairwise", True)
 
 @torch.no_grad()
 def logreg_no_interc(X, y, verbose=0):
@@ -79,6 +81,7 @@ def logreg_no_interc(X, y, verbose=0):
     return clf
 
 setattr(logreg_no_interc, "req_val", False)
+setattr(logreg_no_interc, "fit_pairwise", True)
 
 
 @torch.no_grad()
@@ -87,6 +90,7 @@ def logreg_sweep_C(X, y, val_X, val_y, verbose=0):
     return clf
 
 setattr(logreg_sweep_C, "req_val", True)
+setattr(logreg_sweep_C, "fit_pairwise", True)
 
     
 @torch.no_grad()
@@ -95,6 +99,7 @@ def logreg_no_interc_sweep_C(X, y, val_X, val_y, verbose=0):
     return clf
 
 setattr(logreg_no_interc_sweep_C, "req_val", True)
+setattr(logreg_no_interc_sweep_C, "fit_pairwise", True)
 
 
 class Averager():
@@ -103,14 +108,22 @@ class Averager():
         self.intercept_ = None
         self.penultimate_ = True
     
-    def fit(self, X, y):
-        sn, c = X.shape
-        self.coef_ = np.full(shape=(1, c), fill_value=1.0 / c)
+    def fit(self, X, y, calibrate=False, verbose=0):
+        c, n, k = X.shape
+        if not calibrate:
+            self.coef_ = np.full(shape=(1, c), fill_value=1.0 / c)
+        else:
+            self.coef_ = np.zeros(shape=(1, c))
+            for ci in range(c):
+                ts = TemperatureScaling(device=X.device, dtp=X.dtype)
+                ts.fit(X[ci], y, verbose=verbose)
+                self.coef_[0, ci] = 1.0 / ts.temp_.item()
+            
         self.intercept_ = np.zeros(shape=(1))
     
     def decision_function(self, X):
         X = check_array(X)
-        return np.mean(X, axis=1)
+        return np.squeeze(X @ self.coef_.T)
     
     def predict_proba(self, X):
         prob = self.decision_function(X)
@@ -130,13 +143,27 @@ def average(X, y, verbose=0):
     return clf
 
 setattr(average, "req_val", False)
+setattr(average, "fit_pairwise", False)
+
+
+@torch.no_grad()
+def cal_average(X, y, val_X, val_y, verbose=0):
+    clf = Averager()
+    clf.fit(val_X, val_y, calibrate=True)
+    return clf
+ 
+setattr(cal_average, "req_val", True)
+setattr(cal_average, "fit_pairwise", False)
+
+   
 
 comb_methods = {"lda": lda,
                 "logreg": logreg,
                 "logreg_no_interc": logreg_no_interc,
                 "logreg_sweep_C": logreg_sweep_C,
                 "logreg_no_interc_sweep_C": logreg_no_interc_sweep_C,
-                "average": average}
+                "average": average,
+                "cal_average": cal_average}
 
 
 def comb_picker(co_m):

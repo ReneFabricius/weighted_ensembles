@@ -75,91 +75,104 @@ class WeightedLinearEnsemble:
                     print("Warning: {} samples with non unit sum of supports found in validation set, \
                           performing softmax".format(num_non_one))
                     MP_val = self.softmax_supports(MP_val)
-            
-        pi = 0
-        for fc in range(self.k_):
-            for sc in range(fc + 1, self.k_):
-                if print_step > 0 and pi % print_step == 0:
-                    print("Fit progress {}%".format(pi // print_step), end="\r")
+        
+        if combining_method.fit_pairwise:
+            pi = 0
+            for fc in range(self.k_):
+                for sc in range(fc + 1, self.k_):
+                    if print_step > 0 and pi % print_step == 0:
+                        print("Fit progress {}%".format(pi // print_step), end="\r")
 
-                # c x n tensor containing True for samples belonging to classes fc, sc
-                SamM = (tar == fc) + (tar == sc)
-                if inc_val:
-                    SamM_val = (tar_val == fc) + (tar_val == sc)
-                if penultimate:
-                    # c x s x 1 tensor, where s is number of samples in classes fc and sc.
-                    # Tensor contains support of networks for class fc minus support for class sc
-                    SS = MP[:, SamM][:, :, fc] - MP[:, SamM][:, :, sc]
-
-                    # s x c tensor of logit supports of k networks for class fc against class sc for s samples
-                    X = SS.squeeze().transpose(0, 1)
-
+                    # c x n tensor containing True for samples belonging to classes fc, sc
+                    SamM = (tar == fc) + (tar == sc)
                     if inc_val:
-                        SS_val = MP_val[:, SamM_val][:, :, fc] - MP_val[:, SamM_val][:, :, sc]
-                        X_val = SS_val.squeeze().transpose(0, 1)
-                else:
-                    # c x s x 2 tensor, where s is number of samples in classes fc and sc.
-                    # Tensor contains supports of networks for classes fc, sc for samples belonging to fc, sc.
-                    SS = MP[:, SamM][:, :, [fc, sc]]
-                    # c x s tensor containing p_fc,sc pairwise probabilities for above mentioned samples
-                    PWP = torch.true_divide(SS[:, :, 0], torch.sum(SS, 2) + (SS[:, :, 0] == 0))
-                    LI = logit(PWP, self.logit_eps_)
-                    # s x c tensor of logit supports of k networks for class fc against class sc for s samples
-                    X = LI.transpose(0, 1)
-                    
-                    if inc_val:
-                        SS_val = MP_val[:, SamM_val][:, :, [fc, sc]]
-                        PWP_val = torch.true_divide(SS_val[:, :, 0], torch.sum(SS_val, 2) + (SS_val[:, :, 0] == 0))
-                        LI_val = logit(PWP_val, self.logit_eps_)
-                        X_val = LI_val.transpose(0, 1)
+                        SamM_val = (tar_val == fc) + (tar_val == sc)
+                    if penultimate:
+                        # c x s x 1 tensor, where s is number of samples in classes fc and sc.
+                        # Tensor contains support of networks for class fc minus support for class sc
+                        SS = MP[:, SamM][:, :, fc] - MP[:, SamM][:, :, sc]
+
+                        # s x c tensor of logit supports of k networks for class fc against class sc for s samples
+                        X = SS.squeeze().transpose(0, 1)
+
+                        if inc_val:
+                            SS_val = MP_val[:, SamM_val][:, :, fc] - MP_val[:, SamM_val][:, :, sc]
+                            X_val = SS_val.squeeze().transpose(0, 1)
+                    else:
+                        # c x s x 2 tensor, where s is number of samples in classes fc and sc.
+                        # Tensor contains supports of networks for classes fc, sc for samples belonging to fc, sc.
+                        SS = MP[:, SamM][:, :, [fc, sc]]
+                        # c x s tensor containing p_fc,sc pairwise probabilities for above mentioned samples
+                        PWP = torch.true_divide(SS[:, :, 0], torch.sum(SS, 2) + (SS[:, :, 0] == 0))
+                        LI = logit(PWP, self.logit_eps_)
+                        # s x c tensor of logit supports of k networks for class fc against class sc for s samples
+                        X = LI.transpose(0, 1)
                         
-                # Prepare targets
-                y = tar[SamM]
-                mask_fc = (y == fc)
-                mask_sc = (y == sc)
-                y[mask_fc] = 1
-                y[mask_sc] = 0
-                
-                if inc_val:
-                    y_val = tar_val[SamM_val]
-                    mask_fc_val = (y_val == fc)
-                    mask_sc_val = (y_val == sc)
-                    y_val[mask_fc_val] = 1
-                    y_val[mask_sc_val] = 0
-
-                if test_normality:
-                    # Test normality of predictors
-                    #fc_pval = torch.tensor([normal_ad(X[mask_fc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
-                    #sc_pval = torch.tensor([normal_ad(X[mask_sc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
-                    fc_pval = torch.tensor(normaltest(X[mask_fc], 0)[1])
-                    sc_pval = torch.tensor(normaltest(X[mask_sc], 0)[1])
-                    self.pvals_[pi, 0, :] = fc_pval
-                    self.pvals_[pi, 1, :] = sc_pval
-                    if verbose > 0:
-                        print("P-values of normality test for class " + str(fc))
-                        print(str(fc_pval))
-                        print("P-values of normality test for class " + str(sc))
-                        print(str(sc_pval))
-
-                if inc_val:
-                    clf = comb_m(X=X, y=y, val_X=X_val, val_y=y_val, verbose=verbose)
-                else:
-                    clf = comb_m(X=X, y=y, verbose=verbose)
+                        if inc_val:
+                            SS_val = MP_val[:, SamM_val][:, :, [fc, sc]]
+                            PWP_val = torch.true_divide(SS_val[:, :, 0], torch.sum(SS_val, 2) + (SS_val[:, :, 0] == 0))
+                            LI_val = logit(PWP_val, self.logit_eps_)
+                            X_val = LI_val.transpose(0, 1)
+                            
+                    # Prepare targets
+                    y = tar[SamM]
+                    mask_fc = (y == fc)
+                    mask_sc = (y == sc)
+                    y[mask_fc] = 1
+                    y[mask_sc] = 0
                     
-                self.cls_models_[fc][sc] = clf
-                self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
-                                                    torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
+                    if inc_val:
+                        y_val = tar_val[SamM_val]
+                        mask_fc_val = (y_val == fc)
+                        mask_sc_val = (y_val == sc)
+                        y_val[mask_fc_val] = 1
+                        y_val[mask_sc_val] = 0
 
-                if verbose > 1:
-                    pwacc = pairwise_accuracies(SS, y)
-                    print("Training pairwise accuracies for classes: " + str(fc) + ", " + str(sc) +
-                            "\n\tpairwise accuracies: " + str(pwacc) +
-                            "\n\tchosen coefficients: " + str(clf.coef_) +
-                            "\n\tintercept: " + str(clf.intercept_))
+                    if test_normality:
+                        # Test normality of predictors
+                        #fc_pval = torch.tensor([normal_ad(X[mask_fc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
+                        #sc_pval = torch.tensor([normal_ad(X[mask_sc][:, ci].numpy(), 0)[1] for ci in range(self.c_)])
+                        fc_pval = torch.tensor(normaltest(X[mask_fc], 0)[1])
+                        sc_pval = torch.tensor(normaltest(X[mask_sc], 0)[1])
+                        self.pvals_[pi, 0, :] = fc_pval
+                        self.pvals_[pi, 1, :] = sc_pval
+                        if verbose > 0:
+                            print("P-values of normality test for class " + str(fc))
+                            print(str(fc_pval))
+                            print("P-values of normality test for class " + str(sc))
+                            print(str(sc_pval))
 
-                    print("\tcombined accuracy: " + str(clf.score(X.cpu(), y.cpu())))
+                    if inc_val:
+                        clf = comb_m(X=X, y=y, val_X=X_val, val_y=y_val, verbose=verbose)
+                    else:
+                        clf = comb_m(X=X, y=y, verbose=verbose)
+                        
+                    self.cls_models_[fc][sc] = clf
+                    self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
+                                                        torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
 
-                pi += 1
+                    if verbose > 1:
+                        pwacc = pairwise_accuracies(SS, y)
+                        print("Training pairwise accuracies for classes: " + str(fc) + ", " + str(sc) +
+                                "\n\tpairwise accuracies: " + str(pwacc) +
+                                "\n\tchosen coefficients: " + str(clf.coef_) +
+                                "\n\tintercept: " + str(clf.intercept_))
+
+                        print("\tcombined accuracy: " + str(clf.score(X.cpu(), y.cpu())))
+
+                    pi += 1
+
+        else:
+            if inc_val:
+                clf = combining_method(X=MP, y=tar, val_X=MP_val, val_y=tar_val, verbose=verbose)
+            else:
+                clf = combining_method(X=MP, y=tar, verbose=verbose)
+            
+            for fc in range(self.k_):
+                for sc in range(fc + 1, self.k_):
+                    self.cls_models_[fc][sc] = clf
+                    self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
+                                                        torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
 
         if test_normality:
             blw_5 = torch.sum(self.pvals_ < 0.05)
