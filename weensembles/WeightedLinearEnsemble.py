@@ -28,6 +28,7 @@ class WeightedLinearEnsemble:
         self.cls_models_ = [[None for _ in range(k)] for _ in range(k)]
         self.pvals_ = None
         self.trained_on_penultimate_ = None
+        self.combine_probs_ = False
 
     @torch.no_grad()
     def fit(self, MP, tar, combining_method,
@@ -57,6 +58,8 @@ class WeightedLinearEnsemble:
         if inc_val and (MP_val is None or tar_val is None):
             print("MP_val and tar_val are required for combining method {}".format(comb_m.__name__))
             return 1
+        
+        self.combine_probs_ = comb_m.combine_probs
         
         num = self.k_ * (self.k_ - 1) // 2      # Number of pairs of classes
         if test_normality:
@@ -476,14 +479,18 @@ class WeightedLinearEnsemble:
                 # source indexes of values in pcLIflat
                 I3 = torch.arange(c, device=self.dev_).repeat(pcn * val_ps)
 
-                # Extract lda coefficients
+                # Extract linear coefficients
                 Ws = self.coefs_[I1, I2, I3]
                 Bs = self.coefs_[I1woc.flatten(), I2woc.flatten(), c]
 
-                # Apply lda predict_proba
+                # Apply linear predict_proba
                 pcLC = pcLIflat * Ws
-                pcDEC = torch.sum(pcLC.view(pcn * val_ps, c), 1) + Bs
-                CPWP = 1 / (1 + torch.exp(-pcDEC))
+                if self.combine_probs_:
+                    pcLC_prob = 1 / (1 + torch.exp(-pcLC))
+                    CPWP = torch.mean(pcLC_prob.view(pcn * val_ps, c), dim=1)
+                else:
+                    pcDEC = torch.sum(pcLC.view(pcn * val_ps, c), 1) + Bs
+                    CPWP = 1 / (1 + torch.exp(-pcDEC))
 
                 # Build dense matrices of pairwise probabilities disregarding original positions in all-class setting
                 dI0 = torch.arange(0, pcn, device=self.dev_, dtype=self.dtp_).repeat_interleave(val_ps)
@@ -524,7 +531,7 @@ class WeightedLinearEnsemble:
         """
         if verbose > 0:
             print("Saving ensemble into file: " + str(file))
-        dump_dict = {"models": self.cls_models_, "on_penult": self.trained_on_penultimate_}
+        dump_dict = {"models": self.cls_models_, "on_penult": self.trained_on_penultimate_, "comb_prob": self.combine_probs_}
         with open(file, 'wb') as f:
             pickle.dump(dump_dict, f)
 
@@ -541,6 +548,7 @@ class WeightedLinearEnsemble:
             dump_dict = pickle.load(f)
             self.cls_models_ = dump_dict["models"]
             self.trained_on_penultimate_ = dump_dict["on_penult"]
+            self.combine_probs_ = dump_dict["comb_prob"] if "comb_prob" in dump_dict else False
 
         self.k_ = len(self.cls_models_)
         if self.k_ > 0:

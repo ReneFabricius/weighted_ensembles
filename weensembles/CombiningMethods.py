@@ -63,6 +63,7 @@ def lda(X, y, verbose=0):
 
 setattr(lda, "req_val", False)
 setattr(lda, "fit_pairwise", True)
+setattr(lda, "combine_probs", False)
 
 
 @torch.no_grad()
@@ -73,6 +74,7 @@ def logreg(X, y, verbose=0):
 
 setattr(logreg, "req_val", False)
 setattr(logreg, "fit_pairwise", True)
+setattr(logreg, "combine_probs", False)
 
 @torch.no_grad()
 def logreg_no_interc(X, y, verbose=0):
@@ -82,6 +84,7 @@ def logreg_no_interc(X, y, verbose=0):
 
 setattr(logreg_no_interc, "req_val", False)
 setattr(logreg_no_interc, "fit_pairwise", True)
+setattr(logreg_no_interc, "combine_probs", False)
 
 
 @torch.no_grad()
@@ -91,6 +94,7 @@ def logreg_sweep_C(X, y, val_X, val_y, verbose=0):
 
 setattr(logreg_sweep_C, "req_val", True)
 setattr(logreg_sweep_C, "fit_pairwise", True)
+setattr(logreg_sweep_C, "combine_probs", False)
 
     
 @torch.no_grad()
@@ -100,18 +104,36 @@ def logreg_no_interc_sweep_C(X, y, val_X, val_y, verbose=0):
 
 setattr(logreg_no_interc_sweep_C, "req_val", True)
 setattr(logreg_no_interc_sweep_C, "fit_pairwise", True)
+setattr(logreg_no_interc_sweep_C, "combine_probs", False)
 
 
 class Averager():
-    def __init__(self):
+    def __init__(self, combine_probs = False):
+        """Initializes averager combining model.
+
+        Args:
+            combine_probs (bool, optional): If true, multiplies provided inputs by coefficients, computed expits and then averages results. Defaults to False.
+        """
         self.coef_ = None
         self.intercept_ = None
         self.penultimate_ = True
+        self.combine_probs_ = combine_probs
     
     def fit(self, X, y, calibrate=False, verbose=0):
+        """Fits the averager combining model.
+
+        Args:
+            X (tensor): Tensor of training predictors. Shape c × n × k, where c is number of classifiers, n is number of training samples ank k in number of classes.
+            y (tensor): Tensor of traininng labels. Shape n.
+            calibrate (bool, optional): Whether to set coefficients equal to inverse of temperature scaling temperatures. Defaults to False.
+            verbose (int, optional): [description]. Defaults to 0.
+        """
         c, n, k = X.shape
         if not calibrate:
-            self.coef_ = np.full(shape=(1, c), fill_value=1.0 / c)
+            if not self.combine_probs_:
+                self.coef_ = np.full(shape=(1, c), fill_value=1.0 / c)
+            else:
+                self.coef_ = np.ones(shape=(1, c))
         else:
             self.coef_ = np.zeros(shape=(1, c))
             for ci in range(c):
@@ -123,11 +145,26 @@ class Averager():
     
     def decision_function(self, X):
         X = check_array(X)
-        return np.squeeze(X @ self.coef_.T)
+        return np.squeeze(X @ self.coef_.T + self.intercept_)
     
     def predict_proba(self, X):
-        prob = self.decision_function(X)
-        expit(prob, out=prob)
+        """Combines inputs and predicts probability.
+
+        Args:
+            X (tensor): Tensor of inputs. Shape n × c.
+
+        Returns:
+            [tensor]: Resulting probabilities. Shape n × 2. Probability of class for which supports are given is at index 1. 
+        """
+        if not self.combine_probs_:
+            prob = self.decision_function(X)
+            expit(prob, out=prob)
+        else:
+            X = check_array(X)
+            sup = X * self.coef_
+            probs = expit(sup)
+            prob = np.mean(probs, axis=-1)
+        
         return np.vstack([1 - prob, prob]).T
     
     def score(self, X, y):
@@ -139,23 +176,43 @@ class Averager():
 @torch.no_grad()
 def average(X, y, verbose=0):
     clf = Averager()
-    clf.fit(X, y)
+    clf.fit(X, y, verbose=verbose)
     return clf
 
 setattr(average, "req_val", False)
 setattr(average, "fit_pairwise", False)
-
+setattr(average, "combine_probs", False)
 
 @torch.no_grad()
 def cal_average(X, y, val_X, val_y, verbose=0):
     clf = Averager()
-    clf.fit(val_X, val_y, calibrate=True)
+    clf.fit(val_X, val_y, calibrate=True, verbose=verbose)
     return clf
  
 setattr(cal_average, "req_val", True)
 setattr(cal_average, "fit_pairwise", False)
+setattr(cal_average, "combine_probs", False)
 
-   
+@torch.no_grad()
+def prob_average(X, y, verbose=0):
+    clf = Averager(combine_probs=True)
+    clf.fit(X, y, verbose=verbose)
+    return clf
+
+setattr(prob_average, "req_val", False)
+setattr(prob_average, "fit_pairwise", False)
+setattr(prob_average, "combine_probs", True)
+
+@torch.no_grad()
+def cal_prob_average(X, y, val_X, val_y, verbose=0):
+    clf = Averager(combine_probs=True)
+    clf.fit(val_X, val_y, calibrate=True, verbose=verbose)
+    return clf
+
+setattr(cal_prob_average, "req_val", True)
+setattr(cal_prob_average, "fit_pairwise", False)
+setattr(cal_prob_average, "combine_probs", True)
+
 
 comb_methods = {"lda": lda,
                 "logreg": logreg,
@@ -163,7 +220,9 @@ comb_methods = {"lda": lda,
                 "logreg_sweep_C": logreg_sweep_C,
                 "logreg_no_interc_sweep_C": logreg_no_interc_sweep_C,
                 "average": average,
-                "cal_average": cal_average}
+                "cal_average": cal_average,
+                "prob_average": prob_average,
+                "cal_prob_average": cal_prob_average}
 
 
 def comb_picker(co_m):
