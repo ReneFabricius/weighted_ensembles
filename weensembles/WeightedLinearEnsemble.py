@@ -258,7 +258,7 @@ class WeightedLinearEnsemble:
         probs = torch.cat(prob_batches, dim=0)
 
         if output_R:
-            return probs, p_probs
+            return probs, R_dev_dtp
 
         return probs
 
