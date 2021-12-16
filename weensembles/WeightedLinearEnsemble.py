@@ -559,6 +559,11 @@ class WeightedLinearEnsemble:
         for fc in range(len(self.cls_models_)):
             for sc in range(fc + 1, len(self.cls_models_[fc])):
                 clf = self.cls_models_[fc][sc]
+                # Compatibility hack
+                if type(clf).__name__ == "Averager":
+                    if not hasattr(clf, "combine_probs_"):
+                        setattr(clf, "combine_probs_", False)
+                        
                 self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
                                                     torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
 
