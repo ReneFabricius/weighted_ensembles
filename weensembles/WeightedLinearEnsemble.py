@@ -356,7 +356,6 @@ class WeightedLinearEnsemble:
 
         return ps
 
-    @torch.no_grad()
     def predict_proba_topl_fast(self, MP, l, coupling_method, batch_size=None, verbose=0):
         """
         Better optimized version of predict_proba_topl
