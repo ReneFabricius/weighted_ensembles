@@ -2,7 +2,6 @@ import torch
 from timeit import default_timer as timer
 
 
-@torch.no_grad()
 def m1(PP, verbose=0):
     """
     Method one of Wu, Lin and Weng.
@@ -46,7 +45,6 @@ def m1(PP, verbose=0):
     return ps
 
 
-@torch.no_grad()
 def m2(PP, verbose=0):
     """
     Method two of Wu, Lin and Weng.
@@ -89,7 +87,6 @@ def m2(PP, verbose=0):
     return ps
 
 
-@torch.no_grad()
 def m2_iter(PP, verbose=0):
     """
     Method two, iterative implementation of Wu, Lin and Weng.
@@ -155,7 +152,6 @@ def m2_iter(PP, verbose=0):
     return p.squeeze(2)
 
 
-@torch.no_grad()
 def bc(PP, verbose=0):
     """
     Bayes covariant method of Such and Barreda.
@@ -213,7 +209,6 @@ def bc(PP, verbose=0):
     return ps.T
 
 
-@torch.no_grad()
 def sbt(PP, verbose=0):
     """
     Coupling method of Such, Benus and Tinajova.
