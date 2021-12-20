@@ -137,6 +137,13 @@ def grad_comb(X, y, wle, coupling_method, verbose=0, epochs=10, lr=0.01, momentu
     nll_loss = torch.nn.NLLLoss()
     opt = torch.optim.SGD(params=(coefs,), lr=lr, momentum=momentum)
     
+    if test_period is not None:
+        with torch.no_grad():
+            test_pred = wle.predict_proba_topl_fast(MP=X, l=k, coupling_method=coupling_method, coefs=coefs, verbose=max(verbose - 2, 0))
+            acc = compute_acc_topk(pred=test_pred, tar=y, k=1)
+            nll = compute_nll(pred=test_pred, tar=y)
+            print("Before training: acc {}, nll {}".format(acc, nll))
+
     for e in range(epochs):
         if verbose > 1:
             print("Processing epoch {} out of {}".format(e, epochs))
@@ -178,12 +185,12 @@ def grad_comb(X, y, wle, coupling_method, verbose=0, epochs=10, lr=0.01, momentu
                     mbatch_sz = int(0.5 * mbatch_sz)
                     torch.cuda.empty_cache()
             
-            if test_period is not None and (e + 1) % test_period == 0:
-                with torch.no_grad():
-                    test_pred = wle.predict_proba_topl_fast(MP=X, l=k, coupling_method=coupling_method, coefs=coefs, verbose=max(verbose - 2, 0))
-                    acc = compute_acc_topk(pred=test_pred, tar=y, k=1)
-                    nll = compute_nll(pred=test_pred, tar=y)
-                    print("Test epoch {}: acc {}, nll {}".format(e, acc, nll))
+        if test_period is not None and (e + 1) % test_period == 0:
+            with torch.no_grad():
+                test_pred = wle.predict_proba_topl_fast(MP=X, l=k, coupling_method=coupling_method, coefs=coefs, verbose=max(verbose - 2, 0))
+                acc = compute_acc_topk(pred=test_pred, tar=y, k=1)
+                nll = compute_nll(pred=test_pred, tar=y)
+                print("Test epoch {}: acc {}, nll {}".format(e, acc, nll))
 
     avgs = [[None for _ in range(k)] for _ in range(k)]
     coefs.requires_grad_(False)
