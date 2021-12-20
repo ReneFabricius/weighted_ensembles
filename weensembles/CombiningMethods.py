@@ -62,8 +62,8 @@ class Averager():
         Args:
             combine_probs (bool, optional): If true, multiplies provided inputs by coefficients, computed expits and then averages results. Defaults to False.
         """
-        self.coef_ = check_array(coefs) if coefs is not None else None
-        self.intercept_ = check_array(intercept) if intercept is not None else None 
+        self.coef_ = coefs.numpy() if coefs is not None else None
+        self.intercept_ = intercept.numpy() if intercept is not None else None 
         self.penultimate_ = True
         self.combine_probs_ = combine_probs
     
