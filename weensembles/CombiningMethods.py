@@ -180,6 +180,7 @@ def grad_comb(X, y, wle, coupling_method, verbose=0):
 
     avgs = [[None for _ in range(k)] for _ in range(k)]
     coefs.requires_grad_(False)
+    coefs = coefs.detach().cpu()
     for fc in range(k):
         for sc in range(fc + 1, k):
             avgs[fc][sc] = Averager(combine_probs=False, coefs=coefs[fc, sc, 0:c], intercept=coefs[fc, sc, [c]])
