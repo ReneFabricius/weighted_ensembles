@@ -162,8 +162,10 @@ def grad_comb(X, y, wle, coupling_method, verbose=0):
                     for mbatch_s in range(0, len(y_batch), mbatch_sz):
                         X_mb = X_batch[:, mbatch_s:(mbatch_s + mbatch_sz)]
                         y_mb = y_batch[mbatch_s:(mbatch_s + mbatch_sz)]
-                        pred = wle.predict_proba_topl_fast(MP=X_mb, l=k, coupling_method="m1", coefs=coefs, verbose=verbose)
+                        pred = wle.predict_proba_topl_fast(MP=X_mb, l=k, coupling_method="m1", coefs=coefs, verbose=max(verbose - 2, 0))
                         loss = nll_loss(pred, y_mb) * (len(y_mb) / len(y_batch))
+                        if verbose > 1:
+                            print("Loss: {}".format(loss))
                         loss.backward()
                     
                     opt.step()
