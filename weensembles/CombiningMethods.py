@@ -122,11 +122,10 @@ class Averager():
         return np.sum(preds == y) / len(y)
  
 
-def grad_comb(X, y, wle, coupling_method, verbose=0, epochs=10, lr=0.01, momentum=0.9, test_period=None):
+def grad_comb(X, y, wle, coupling_method, verbose=0, epochs=10, lr=0.01, momentum=0.9, test_period=None, batch_sz=500, return_coefs=False):
     if verbose > 0:
-        print("Starting grad_m1 fit")
+        print("Starting grad_{} fit".format(coupling_method))
     c, n, k = X.shape
-    batch_sz = 500
     
     wle.trained_on_penultimate_ = True
     coefs = torch.full(size=(k, k, c + 1), fill_value=1.0 / c, device=X.device, dtype=X.dtype)
@@ -194,6 +193,9 @@ def grad_comb(X, y, wle, coupling_method, verbose=0, epochs=10, lr=0.01, momentu
 
     avgs = [[None for _ in range(k)] for _ in range(k)]
     coefs.requires_grad_(False)
+    if return_coefs:
+        return coefs
+    
     coefs = coefs.detach().cpu()
     for fc in range(k):
         for sc in range(fc + 1, k):
