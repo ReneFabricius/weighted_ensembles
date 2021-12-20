@@ -30,7 +30,6 @@ class WeightedLinearEnsemble:
         self.trained_on_penultimate_ = None
         self.combine_probs_ = False
 
-    @torch.no_grad()
     def fit(self, MP, tar, combining_method,
             verbose=0, test_normality=False, penultimate=True, MP_val=None, tar_val=None):
         """
@@ -146,9 +145,9 @@ class WeightedLinearEnsemble:
                             print(str(sc_pval))
 
                     if inc_val:
-                        clf = comb_m(X=X, y=y, val_X=X_val, val_y=y_val, verbose=verbose)
+                        clf = comb_m(X=X, y=y, val_X=X_val, val_y=y_val, wle=self, verbose=verbose)
                     else:
-                        clf = comb_m(X=X, y=y, verbose=verbose)
+                        clf = comb_m(X=X, y=y, wle=self, verbose=verbose)
                         
                     self.cls_models_[fc][sc] = clf
                     self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
@@ -167,14 +166,19 @@ class WeightedLinearEnsemble:
 
         else:
             if inc_val:
-                clf = comb_m(X=MP, y=tar, val_X=MP_val, val_y=tar_val, verbose=verbose)
+                clf = comb_m(X=MP, y=tar, val_X=MP_val, val_y=tar_val, wle=self, verbose=verbose)
             else:
-                clf = comb_m(X=MP, y=tar, verbose=verbose)
+                clf = comb_m(X=MP, y=tar, wle=self, verbose=verbose)
             
             for fc in range(self.k_):
                 for sc in range(fc + 1, self.k_):
-                    self.cls_models_[fc][sc] = clf
-                    self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
+                    if type(clf) == list:
+                        self.cls_models_[fc][sc] = clf[fc][sc]
+                        self.coefs_[fc, sc, :] = torch.cat([clf[fc][sc].coef_.squeeze(),
+                                                           clf[fc][sc].intercept_])
+                    else:
+                        self.cls_models_[fc][sc] = clf
+                        self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
                                                         torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
 
         if test_normality:
@@ -356,7 +360,7 @@ class WeightedLinearEnsemble:
 
         return ps
 
-    def predict_proba_topl_fast(self, MP, l, coupling_method, batch_size=None, verbose=0):
+    def predict_proba_topl_fast(self, MP, l, coupling_method, batch_size=None, verbose=0, coefs=None):
         """
         Better optimized version of predict_proba_topl
         Combines outputs of constituent classifiers using only those classes, which are among the top l most probable
@@ -375,7 +379,7 @@ class WeightedLinearEnsemble:
             print("Unknown coupling method {} selected".format(coupling_method))
             return 1
  
-        if self.trained_on_penultimate_ is None:
+        if self.trained_on_penultimate_ is None and coefs is None:
             print("Ensemble not trained")
             return
         start = timer()
@@ -479,9 +483,13 @@ class WeightedLinearEnsemble:
                 I3 = torch.arange(c, device=self.dev_).repeat(pcn * val_ps)
 
                 # Extract linear coefficients
-                Ws = self.coefs_[I1, I2, I3]
-                Bs = self.coefs_[I1woc.flatten(), I2woc.flatten(), c]
-
+                if coefs is None:
+                    Ws = self.coefs_[I1, I2, I3]
+                    Bs = self.coefs_[I1woc.flatten(), I2woc.flatten(), c]
+                else:
+                    Ws = coefs[I1, I2, I3]
+                    Bs = coefs[I1woc.flatten(), I2woc.flatten(), c]
+                
                 # Apply linear predict_proba
                 pcLC = pcLIflat * Ws
                 if self.combine_probs_:
