@@ -8,6 +8,7 @@ import numpy as np
 from torch.optim import optimizer
 
 from weensembles.CalibrationMethod import TemperatureScaling
+from weensembles.predictions_evaluation import compute_acc_topk, compute_nll
 
 @torch.no_grad()
 def _logreg_sweep_C(X, y, val_X, val_y, fit_intercept=False, verbose=0):
@@ -121,14 +122,11 @@ class Averager():
         return np.sum(preds == y) / len(y)
  
 
-def grad_comb(X, y, wle, coupling_method, verbose=0):
+def grad_comb(X, y, wle, coupling_method, verbose=0, epochs=10, lr=0.01, momentum=0.9, test_period=None):
     if verbose > 0:
         print("Starting grad_m1 fit")
     c, n, k = X.shape
-    epochs = 10
     batch_sz = 500
-    lr = 0.01
-    momentum = 0.9
     
     wle.trained_on_penultimate_ = True
     coefs = torch.full(size=(k, k, c + 1), fill_value=1.0 / c, device=X.device, dtype=X.dtype)
@@ -162,8 +160,8 @@ def grad_comb(X, y, wle, coupling_method, verbose=0):
                     for mbatch_s in range(0, len(y_batch), mbatch_sz):
                         X_mb = X_batch[:, mbatch_s:(mbatch_s + mbatch_sz)]
                         y_mb = y_batch[mbatch_s:(mbatch_s + mbatch_sz)]
-                        pred = wle.predict_proba_topl_fast(MP=X_mb, l=k, coupling_method="m1", coefs=coefs, verbose=max(verbose - 2, 0))
-                        loss = nll_loss(pred, y_mb) * (len(y_mb) / len(y_batch))
+                        pred = wle.predict_proba_topl_fast(MP=X_mb, l=k, coupling_method=coupling_method, coefs=coefs, verbose=max(verbose - 2, 0))
+                        loss = nll_loss(torch.log(pred), y_mb) * (len(y_mb) / len(y_batch))
                         if verbose > 1:
                             print("Loss: {}".format(loss))
                         loss.backward()
@@ -179,6 +177,13 @@ def grad_comb(X, y, wle, coupling_method, verbose=0):
                     del rerr
                     mbatch_sz = int(0.5 * mbatch_sz)
                     torch.cuda.empty_cache()
+            
+            if test_period is not None and (e + 1) % test_period == 0:
+                with torch.no_grad():
+                    test_pred = wle.predict_proba_topl_fast(MP=X, l=k, coupling_method=coupling_method, coefs=coefs, verbose=max(verbose - 2, 0))
+                    acc = compute_acc_topk(pred=test_pred, tar=y, k=1)
+                    nll = compute_nll(pred=test_pred, tar=y)
+                    print("Test epoch {}: acc {}, nll {}".format(e, acc, nll))
 
     avgs = [[None for _ in range(k)] for _ in range(k)]
     coefs.requires_grad_(False)
