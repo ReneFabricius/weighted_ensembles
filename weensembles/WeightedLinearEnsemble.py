@@ -174,8 +174,9 @@ class WeightedLinearEnsemble:
                 for sc in range(fc + 1, self.k_):
                     if type(clf) == list:
                         self.cls_models_[fc][sc] = clf[fc][sc]
-                        self.coefs_[fc, sc, :] = torch.cat([clf[fc][sc].coef_.squeeze(),
-                                                           clf[fc][sc].intercept_])
+                        self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf[fc][sc].coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
+                                                        torch.tensor(clf[fc][sc].intercept_, device=self.dev_, dtype=self.dtp_)))
+
                     else:
                         self.cls_models_[fc][sc] = clf
                         self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
