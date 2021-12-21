@@ -9,6 +9,7 @@ from torch.optim import optimizer
 
 from weensembles.CalibrationMethod import TemperatureScaling
 from weensembles.predictions_evaluation import compute_acc_topk, compute_nll
+from weensembles.utils import cuda_mem_try
 
 @torch.no_grad()
 def _logreg_sweep_C(X, y, val_X, val_y, fit_intercept=False, verbose=0):
@@ -138,7 +139,11 @@ def grad_comb(X, y, wle, coupling_method, verbose=0, epochs=10, lr=0.01, momentu
     
     if test_period is not None:
         with torch.no_grad():
-            test_pred = wle.predict_proba_topl_fast(MP=X, l=k, coupling_method=coupling_method, coefs=coefs, verbose=max(verbose - 2, 0))
+            test_bsz = X.shape[1]
+            test_pred = cuda_mem_try(
+                fun=lambda bsz: wle.predict_proba_topl_fast(MP=X, l=k, coupling_method=coupling_method, coefs=coefs, verbose=max(verbose - 2, 0), batch_size=bsz),
+                start_bsz=test_bsz, verbose=verbose)
+            
             acc = compute_acc_topk(pred=test_pred, tar=y, k=1)
             nll = compute_nll(pred=test_pred, tar=y)
             print("Before training: acc {}, nll {}".format(acc, nll))
@@ -166,7 +171,7 @@ def grad_comb(X, y, wle, coupling_method, verbose=0, epochs=10, lr=0.01, momentu
                     for mbatch_s in range(0, len(y_batch), mbatch_sz):
                         X_mb = X_batch[:, mbatch_s:(mbatch_s + mbatch_sz)]
                         y_mb = y_batch[mbatch_s:(mbatch_s + mbatch_sz)]
-                        pred = wle.predict_proba_topl_fast(MP=X_mb, l=k, coupling_method=coupling_method, coefs=coefs, verbose=max(verbose - 2, 0))
+                        pred = wle.predict_proba_topl_fast(MP=X_mb, l=k, coupling_method=coupling_method, coefs=coefs, verbose=max(verbose - 2, 0), batch_size=mbatch_sz)
                         loss = nll_loss(torch.log(pred), y_mb) * (len(y_mb) / len(y_batch))
                         if verbose > 1:
                             print("Loss: {}".format(loss))
@@ -186,7 +191,10 @@ def grad_comb(X, y, wle, coupling_method, verbose=0, epochs=10, lr=0.01, momentu
             
         if test_period is not None and (e + 1) % test_period == 0:
             with torch.no_grad():
-                test_pred = wle.predict_proba_topl_fast(MP=X, l=k, coupling_method=coupling_method, coefs=coefs, verbose=max(verbose - 2, 0))
+                test_pred = cuda_mem_try(
+                    fun=lambda bsz: wle.predict_proba_topl_fast(MP=X, l=k, coupling_method=coupling_method, coefs=coefs, verbose=max(verbose - 2, 0), batch_size=bsz),
+                    start_bsz=test_bsz, verbose=verbose)
+
                 acc = compute_acc_topk(pred=test_pred, tar=y, k=1)
                 nll = compute_nll(pred=test_pred, tar=y)
                 print("Test epoch {}: acc {}, nll {}".format(e, acc, nll))

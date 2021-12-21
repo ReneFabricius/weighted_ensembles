@@ -208,3 +208,36 @@ def pairwise_accuracies_penultimate(SS, tar):
     c, n = SS.size()
     ti = SS > 0
     return torch.sum(ti == tar, dim=1) / float(n)
+
+
+def cuda_mem_try(fun, start_bsz, dec_coef=0.5, max_tries=None, verbose=0):
+    """Repeatedly to perform action specified by given function which could fail due to cuda oom.
+    Each try is performed with lower batch size than previous.
+
+    Args:
+        fun (function): Function with one argument - batch size.
+        start_bsz (int): STarting batch size.
+        dec_coef (float, optional): Coeficient used to multiplicatively decrease batch size. Defaults to 0.5.
+        max_tries (int, optional): Maximum number of tries. If None, tries are not limited. Defaults to None.
+    """
+    batch_size = start_bsz
+    while batch_size > 0 and (max_tries is None or max_tries > 0):
+        try:
+            if verbose > 1:
+                print("Trying with batch size {}".format(batch_size))
+            return fun(batch_size)
+        except RuntimeError as rerr:
+            str_err = str(rerr)
+            if "memory" not in str_err and "CUDA" not in str_err: 
+                raise rerr
+            if verbose > 1:
+                print("CUDA oom exception")
+            del rerr
+            batch_size = int(dec_coef * batch_size)
+            if max_tries is not None:
+                max_tries -= 1
+            torch.cuda.empty_cache()
+    else:
+        raise RuntimeError("Unsuccessful to perform the requested action. CUDA out of memory.")
+            
+            
