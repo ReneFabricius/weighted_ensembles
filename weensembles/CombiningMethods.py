@@ -136,6 +136,8 @@ def grad_comb(X, y, wle, coupling_method, verbose=0, epochs=10, lr=0.01, momentu
     y.requires_grad_(False)
     nll_loss = torch.nn.NLLLoss()
     opt = torch.optim.SGD(params=(coefs,), lr=lr, momentum=momentum)
+    thr_value = 1e-9
+    thresh = torch.nn.Threshold(threshold=thr_value, value=thr_value)
     
     if test_period is not None:
         with torch.no_grad():
@@ -171,7 +173,8 @@ def grad_comb(X, y, wle, coupling_method, verbose=0, epochs=10, lr=0.01, momentu
                     for mbatch_s in range(0, len(y_batch), mbatch_sz):
                         X_mb = X_batch[:, mbatch_s:(mbatch_s + mbatch_sz)]
                         y_mb = y_batch[mbatch_s:(mbatch_s + mbatch_sz)]
-                        pred = wle.predict_proba_topl_fast(MP=X_mb, l=k, coupling_method=coupling_method, coefs=coefs, verbose=max(verbose - 2, 0), batch_size=mbatch_sz)
+                        pred = thresh(wle.predict_proba_topl_fast(MP=X_mb, l=k, coupling_method=coupling_method,
+                                                                  coefs=coefs, verbose=max(verbose - 2, 0), batch_size=mbatch_sz))
                         loss = nll_loss(torch.log(pred), y_mb) * (len(y_mb) / len(y_batch))
                         if verbose > 1:
                             print("Loss: {}".format(loss))
