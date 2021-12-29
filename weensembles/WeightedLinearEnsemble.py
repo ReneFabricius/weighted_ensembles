@@ -24,14 +24,13 @@ class WeightedLinearEnsemble:
         self.logit_eps_ = 1e-5
         self.c_ = c
         self.k_ = k
-        self.coefs_ = torch.zeros(k, k, c + 1, device=self.dev_, dtype=self.dtp_)
-        self.cls_models_ = [[None for _ in range(k)] for _ in range(k)]
+        self.coefs_ = None 
+        self.comb_model_ = None 
         self.pvals_ = None
-        self.trained_on_penultimate_ = None
-        self.combine_probs_ = False
+        self.trained_ = False
 
     def fit(self, MP, tar, combining_method,
-            verbose=0, test_normality=False, penultimate=True, MP_val=None, tar_val=None):
+            verbose=0, test_normality=False, MP_val=None, tar_val=None):
         """
         Trains linear classifier on logits of pairwise probabilities for every pair of classes
         :param combining_method: linear classifier to use.
@@ -40,45 +39,32 @@ class WeightedLinearEnsemble:
         :param tar: n tensor of sample labels
         :param verbose: print more detailed output
         :param test_normality: test normality of lda predictors for each class in each class pair
-        :param penultimate: Whether outputs of classifiers in parameter MP are from penultimate layer(logits) or from softmax.
         :param MP_val: Validation set used for hyperparameter sweep. Required if combining_method.req_val is True.
         :param tar_val: Validation set targets. Required if combining_method.req_val is True. 
         :return:
         """
-
-        print("Starting fit")
+        if verbose > 0:
+            print("Starting fit, combining method: {}".format(combining_method))
         start = timer()
-        comb_m = comb_picker(combining_method)
+        comb_m = comb_picker(combining_method, device=self.dev_, dtype=self.dtp_)
         if comb_m is None:
             print("Unknown combining method {} selected".format(combining_method))
             return 1
         
-        inc_val = comb_m.req_val
+        self.comb_model_ = comb_m
+        
+        inc_val = comb_m.req_val_
         if inc_val and (MP_val is None or tar_val is None):
             print("MP_val and tar_val are required for combining method {}".format(comb_m.__name__))
             return 1
-        
-        self.combine_probs_ = comb_m.combine_probs
         
         num = self.k_ * (self.k_ - 1) // 2      # Number of pairs of classes
         if test_normality:
             self.pvals_ = torch.zeros(num, 2, self.c_, device=torch.device("cpu"), dtype=self.dtp_)
         print_step = num // 100
 
-        if not penultimate:
-            num_non_one = torch.sum(torch.abs(torch.sum(MP, dim=2) - 1.0) > self.logit_eps_).item()
-            if num_non_one > 0:
-                print("Warning: {} samples with non unit sum of supports found, \
-                      performing softmax".format(num_non_one))
-                MP = self.softmax_supports(MP)
-            if inc_val:
-                num_non_one_val = torch.sum(torch.abs(torch.sum(MP_val, dim=2) - 1.0) > self.logit_eps_).item()
-                if num_non_one_val > 0:
-                    print("Warning: {} samples with non unit sum of supports found in validation set, \
-                          performing softmax".format(num_non_one))
-                    MP_val = self.softmax_supports(MP_val)
-        
-        if comb_m.fit_pairwise:
+        if comb_m.fit_pairwise_:
+            self.coefs_ = torch.zeros(self.k_, self.k_, self.c_ + 1, device=self.dev_, dtype=self.dtp_)
             pi = 0
             for fc in range(self.k_):
                 for sc in range(fc + 1, self.k_):
@@ -89,33 +75,18 @@ class WeightedLinearEnsemble:
                     SamM = (tar == fc) + (tar == sc)
                     if inc_val:
                         SamM_val = (tar_val == fc) + (tar_val == sc)
-                    if penultimate:
-                        # c x s x 1 tensor, where s is number of samples in classes fc and sc.
-                        # Tensor contains support of networks for class fc minus support for class sc
-                        SS = MP[:, SamM][:, :, fc] - MP[:, SamM][:, :, sc]
-
-                        # s x c tensor of logit supports of k networks for class fc against class sc for s samples
-                        X = SS.squeeze().transpose(0, 1)
-
-                        if inc_val:
-                            SS_val = MP_val[:, SamM_val][:, :, fc] - MP_val[:, SamM_val][:, :, sc]
-                            X_val = SS_val.squeeze().transpose(0, 1)
-                    else:
-                        # c x s x 2 tensor, where s is number of samples in classes fc and sc.
-                        # Tensor contains supports of networks for classes fc, sc for samples belonging to fc, sc.
-                        SS = MP[:, SamM][:, :, [fc, sc]]
-                        # c x s tensor containing p_fc,sc pairwise probabilities for above mentioned samples
-                        PWP = torch.true_divide(SS[:, :, 0], torch.sum(SS, 2) + (SS[:, :, 0] == 0))
-                        LI = logit(PWP, self.logit_eps_)
-                        # s x c tensor of logit supports of k networks for class fc against class sc for s samples
-                        X = LI.transpose(0, 1)
                         
-                        if inc_val:
-                            SS_val = MP_val[:, SamM_val][:, :, [fc, sc]]
-                            PWP_val = torch.true_divide(SS_val[:, :, 0], torch.sum(SS_val, 2) + (SS_val[:, :, 0] == 0))
-                            LI_val = logit(PWP_val, self.logit_eps_)
-                            X_val = LI_val.transpose(0, 1)
-                            
+                    # c x s x 1 tensor, where s is number of samples in classes fc and sc.
+                    # Tensor contains support of networks for class fc minus support for class sc
+                    SS = MP[:, SamM][:, :, fc] - MP[:, SamM][:, :, sc]
+
+                    # s x c tensor of logit supports of k networks for class fc against class sc for s samples
+                    X = SS.squeeze().transpose(0, 1)
+
+                    if inc_val:
+                        SS_val = MP_val[:, SamM_val][:, :, fc] - MP_val[:, SamM_val][:, :, sc]
+                        X_val = SS_val.squeeze().transpose(0, 1)
+                           
                     # Prepare targets
                     y = tar[SamM]
                     mask_fc = (y == fc)
@@ -145,43 +116,29 @@ class WeightedLinearEnsemble:
                             print(str(sc_pval))
 
                     if inc_val:
-                        clf = comb_m(X=X, y=y, val_X=X_val, val_y=y_val, wle=self, verbose=verbose)
+                        pw_coefs = comb_m.train(X=X, y=y, val_X=X_val, val_y=y_val, wle=self, verbose=verbose)
                     else:
-                        clf = comb_m(X=X, y=y, wle=self, verbose=verbose)
+                        pw_coefs = comb_m.train(X=X, y=y, wle=self, verbose=verbose)
                         
-                    self.cls_models_[fc][sc] = clf
-                    self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
-                                                        torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
+                    self.coefs_[fc, sc, :] = pw_coefs
 
                     if verbose > 1:
                         pwacc = pairwise_accuracies(SS, y)
                         print("Training pairwise accuracies for classes: " + str(fc) + ", " + str(sc) +
                                 "\n\tpairwise accuracies: " + str(pwacc) +
-                                "\n\tchosen coefficients: " + str(clf.coef_) +
-                                "\n\tintercept: " + str(clf.intercept_))
+                                "\n\tchosen coefficients: " + str(pw_coefs[:, 0:-1]) +
+                                "\n\tintercept: " + str(pw_coefs[:, -1]))
 
-                        print("\tcombined accuracy: " + str(clf.score(X.cpu(), y.cpu())))
+                        print("\tcombined accuracy: " + str(self.comb_model_.score(X=X, y=y, coefs=pw_coefs)))
 
                     pi += 1
 
         else:
             if inc_val:
-                clf = comb_m(X=MP, y=tar, val_X=MP_val, val_y=tar_val, wle=self, verbose=verbose)
+                self.coefs_ = comb_m.train(X=MP, y=tar, val_X=MP_val, val_y=tar_val, wle=self, verbose=verbose)
             else:
-                clf = comb_m(X=MP, y=tar, wle=self, verbose=verbose)
-            
-            for fc in range(self.k_):
-                for sc in range(fc + 1, self.k_):
-                    if type(clf) == list:
-                        self.cls_models_[fc][sc] = clf[fc][sc]
-                        self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf[fc][sc].coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
-                                                        torch.tensor(clf[fc][sc].intercept_, device=self.dev_, dtype=self.dtp_)))
-
-                    else:
-                        self.cls_models_[fc][sc] = clf
-                        self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
-                                                        torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
-
+                self.coefs_ = comb_m.train(X=MP, y=tar, val_X=None, val_y=None, wle=self, verbose=verbose)
+                
         if test_normality:
             blw_5 = torch.sum(self.pvals_ < 0.05)
             blw_1 = torch.sum(self.pvals_ < 0.01)
@@ -189,8 +146,9 @@ class WeightedLinearEnsemble:
             print("Number of classes with normality pval below 1% " + str(blw_1.item()))
 
         end = timer()
-        self.trained_on_penultimate_ = penultimate
-        print("Fit finished in " + str(end - start) + " s")
+        self.trained_ = True
+        if verbose > 0:
+            print("Fit finished in " + str(end - start) + " s")
         return 0
     
     @torch.no_grad()
@@ -212,7 +170,7 @@ class WeightedLinearEnsemble:
         
         if verbose > 0:
             print("Starting predict proba, coupling method {}".format(coup_m.__name__))
-        if self.trained_on_penultimate_ is None:
+        if not self.trained_:
             print("Ensemble not trained")
             return
 
@@ -222,31 +180,16 @@ class WeightedLinearEnsemble:
         assert k == self.k_
         p_probs = torch.zeros(n, k, k, dtype=self.dtp_)
 
-        if not self.trained_on_penultimate_:
-            num_non_one = torch.sum(torch.abs(torch.sum(MP, dim=2) - 1.0) > self.logit_eps_).item()
-            if num_non_one > 0:
-                print("Warning: " + str(num_non_one) +
-                      " samples with non unit sum of supports found, performing softmax")
-                MP = self.softmax_supports(MP)
-
         for fc in range(self.k_):
             for sc in range(fc + 1, self.k_):
-                if not self.trained_on_penultimate_:
-                    # Obtains fc and sc probabilities for all classes
-                    SS = MP[:, :, [fc, sc]].to(device=self.dev_, dtype=self.dtp_)
-                    # Computes p_ij pairwise probabilities for above mentioned samples
-                    PWP = torch.true_divide(SS[:, :, 0], torch.sum(SS, 2) + (SS[:, :, 0] == 0))
-                    LI = logit(PWP, self.logit_eps_)
-                    X = LI.transpose(0, 1).cpu()
-                else:
-                    SS = MP[:, :, fc] - MP[:, :, sc]
-                    if SS.dim() == 3:
-                        SS = SS.squeeze()
-                    X = SS.transpose(0, 1)
+                SS = MP[:, :, fc] - MP[:, :, sc]
+                if SS.dim() == 3:
+                    SS = SS.squeeze()
+                X = SS.transpose(0, 1)
 
-                PP = self.cls_models_[fc][sc].predict_proba(X.detach().cpu())
-                p_probs[:, sc, fc] = torch.from_numpy(PP[:, 0])
-                p_probs[:, fc, sc] = torch.from_numpy(PP[:, 1])
+                PP = self.comb_model_.predict_proba(X=X, coefs=self.coefs_[[fc], [sc]], verbose=verbose)
+                p_probs[:, sc, fc] = PP[:, 0]
+                p_probs[:, fc, sc] = PP[:, 1]
 
         end = timer()
         if verbose > 0:
@@ -287,10 +230,10 @@ class WeightedLinearEnsemble:
                 print(
                     "Testing pairwise accuracies for classes: " + str(fc) + ", " + str(sc) +
                     "\n\tpairwise accuracies: " + str(pwacc) +
-                    "\n\tchosen coefficients: " + str(self.cls_models_[fc][sc].coef_) +
-                    "\n\tintercept: " + str(self.cls_models_[fc][sc].intercept_))
+                    "\n\tchosen coefficients: " + str(self.coefs_[fc, sc, 0:-1]) +
+                    "\n\tintercept: " + str(self.coefs_[fc, sc, -1]))
 
-                print("\tcombined accuracy: " + str(self.cls_models_[fc][sc].score(X, y)))
+                print("\tcombined accuracy: " + str(self.comb_model_.score(X=X, y=y, coefs=self.coefs_[[fc], [sc], :])))
 
     @torch.no_grad()
     def predict_proba_topl(self, MP, l, coupling_method, verbose=0):
@@ -310,20 +253,13 @@ class WeightedLinearEnsemble:
             return 1
         if verbose > 0:
             print("Starting predict proba topl")
-        if self.trained_on_penultimate_ is None:
+        if not self.trained_:
             print("Ensemble not trained")
             return
         start = timer()
         c, n, k = MP.size()
         assert c == self.c_
         assert k == self.k_
-
-        if not self.trained_on_penultimate_:
-            num_non_one = torch.sum(torch.abs(torch.sum(MP, dim=2) - 1.0) > self.logit_eps_).item()
-            if num_non_one > 0:
-                print("Warning: " + str(num_non_one) +
-                      " samples with non unit sum of supports found, performing softmax")
-                MP = self.softmax_supports(MP)
 
         ps = torch.zeros(n, k, device=self.dev_, dtype=self.dtp_)
         # Every sample may have different set of top classes, so we process them one by one
@@ -338,19 +274,11 @@ class WeightedLinearEnsemble:
             p_probs = torch.zeros(1, tcc, tcc, device=self.dev_, dtype=self.dtp_)
             for fci, fc in enumerate(Ti):
                 for sci, sc in enumerate(Ti[fci + 1:]):
-                    if not self.trained_on_penultimate_:
-                        # Obtains fc and sc probabilities for current sample
-                        SS = MP[:, ni, [fc, sc]].to(device=self.dev_, dtype=self.dtp_)
-                        # Computes p_ij pairwise probabilities for above mentioned samples
-                        PWP = torch.true_divide(SS[:, 0], torch.sum(SS, 1) + (SS[:, 0] == 0))
-                        LI = logit(PWP, self.logit_eps_)
-                        X = LI.T.unsqueeze(0).cpu()
-                    else:
-                        SS = MP[:, ni, fc] - MP[:, ni, sc]
-                        X = SS.T.unsqueeze(0)
-                    PP = self.cls_models_[fc][sc].predict_proba(X)
-                    p_probs[:, fci + 1 + sci, fci] = torch.from_numpy(PP[:, 0])
-                    p_probs[:, fci, fci + 1 + sci] = torch.from_numpy(PP[:, 1])
+                    SS = MP[:, ni, fc] - MP[:, ni, sc]
+                    X = SS.T.unsqueeze(0)
+                    PP = self.comb_model_.predict_proba(X=X, coefs=self.coefs_[[fc], [sc]], verbose=verbose)
+                    p_probs[:, fci + 1 + sci, fci] = PP[:, 0]
+                    p_probs[:, fci, fci + 1 + sci] = PP[:, 1]
 
             sam_ps = coup_m(p_probs.to(device=self.dev_, dtype=self.dtp_), verbose=verbose)
             ps[ni, Ti] = sam_ps.squeeze()
@@ -361,7 +289,7 @@ class WeightedLinearEnsemble:
 
         return ps
 
-    def predict_proba_topl_fast(self, MP, l, coupling_method, batch_size=None, verbose=0, coefs=None):
+    def predict_proba_topl_fast(self, MP, l, coupling_method, batch_size=None, verbose=0, coefs=None, combine_probs=None):
         """
         Better optimized version of predict_proba_topl
         Combines outputs of constituent classifiers using only those classes, which are among the top l most probable
@@ -380,20 +308,13 @@ class WeightedLinearEnsemble:
             print("Unknown coupling method {} selected".format(coupling_method))
             return 1
  
-        if self.trained_on_penultimate_ is None and coefs is None:
+        if not self.trained_ and coefs is None:
             print("Ensemble not trained")
             return
         start = timer()
         c, n, k = MP.size()
         assert c == self.c_
         assert k == self.k_
-
-        if not self.trained_on_penultimate_:
-            num_non_one = torch.sum(torch.abs(torch.sum(MP, dim=2) - 1.0) > self.logit_eps_).item()
-            if num_non_one > 0:
-                print("Warning: " + str(num_non_one) +
-                      " samples with non unit sum of supports found, performing softmax")
-                MP = self.softmax_supports(MP)
 
         b_size = batch_size if batch_size is not None else n
         ps_list = []
@@ -454,18 +375,9 @@ class WeightedLinearEnsemble:
                 # formed from supports expanded over columns, from left to right, from top to bottom
                 # pcn x c x pc * (pc - 1) // 2 tensor
                 pcMPpC = pcMPp[:, :, pcIMC]
-                if not self.trained_on_penultimate_:
-                    # For every pcn and c contains top right triangle of pairwise probs p_ij
-                    # pcn x c x pc * (pc - 1) // 2 tensor
-                    pcPWP = pcMPpR / (pcMPpR + pcMPpC)
-
-                    # logit pairwise probs
-                    # pcn x c x pc * (pc - 1) // 2 tensor
-                    pcLI = logit(pcPWP, self.logit_eps_)
-                else:
-                    # compute instead as a difference of supports
-                    # pcn x c x pc * (pc - 1) // 2 tensor
-                    pcLI = pcMPpR - pcMPpC
+                                    # compute instead as a difference of supports
+                # pcn x c x pc * (pc - 1) // 2 tensor
+                pcLI = pcMPpR - pcMPpC
 
                 # Flattened logits in order of dimensions: pcn; pc x pc top right triangle by rows; c
                 pcLIflat = pcLI.transpose(1, 2).flatten()
@@ -493,7 +405,7 @@ class WeightedLinearEnsemble:
                 
                 # Apply linear predict_proba
                 pcLC = pcLIflat * Ws
-                if self.combine_probs_:
+                if (combine_probs is None and self.comb_model_.combine_probs_) or combine_probs:
                     pcLC_prob = 1 / (1 + torch.exp(-pcLC))
                     CPWP = torch.mean(pcLC_prob.view(pcn * val_ps, c), dim=1)
                 else:
@@ -539,9 +451,8 @@ class WeightedLinearEnsemble:
         """
         if verbose > 0:
             print("Saving ensemble into file: " + str(file))
-        dump_dict = {"models": self.cls_models_, "on_penult": self.trained_on_penultimate_, "comb_prob": self.combine_probs_}
         with open(file, 'wb') as f:
-            pickle.dump(dump_dict, f)
+            pickle.dump(self.__dict__, f)
 
     @torch.no_grad()
     def load(self, file, verbose=0):
@@ -554,26 +465,8 @@ class WeightedLinearEnsemble:
             print("Loading models from file: " + str(file))
         with open(file, 'rb') as f:
             dump_dict = pickle.load(f)
-            self.cls_models_ = dump_dict["models"]
-            self.trained_on_penultimate_ = dump_dict["on_penult"]
-            self.combine_probs_ = dump_dict["comb_prob"] if "comb_prob" in dump_dict else False
 
-        self.k_ = len(self.cls_models_)
-        if self.k_ > 0:
-            self.c_ = len(self.cls_models_[0][1].coef_[0])
-
-        self.coefs_ = torch.zeros(self.k_, self.k_, self.c_ + 1, device=self.dev_, dtype=self.dtp_)
-
-        for fc in range(len(self.cls_models_)):
-            for sc in range(fc + 1, len(self.cls_models_[fc])):
-                clf = self.cls_models_[fc][sc]
-                # Compatibility hack
-                if type(clf).__name__ == "Averager":
-                    if not hasattr(clf, "combine_probs_"):
-                        setattr(clf, "combine_probs_", False)
-                        
-                self.coefs_[fc, sc, :] = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
-                                                    torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
+        self.__dict__.update(dump_dict)
 
     @torch.no_grad()
     def save_coefs_csv(self, file):
@@ -607,22 +500,3 @@ class WeightedLinearEnsemble:
         else:
             print("P-values not computed")
 
-    @torch.no_grad()
-    def set_averaging_weights(self):
-        """
-        Set the lda weights equal to one.
-        :return:
-        """
-        for fc in range(self.k_):
-            for sc in range(fc + 1, self.k_):
-                self.coefs_[fc, sc, :] = torch.tensor([1]*self.c_ + [0])
-
-    @torch.no_grad()
-    def softmax_supports(self, MP):
-        """
-        Performs softmax on posteriors
-        :param MP: c x n x k tensor of class supports
-        c - number of constituent classifiers, n - number of training samples, k - number of classes
-        :return:c x n x k tensor of posteriors
-        """
-        return torch.nn.Softmax(dim=-1)(MP)
