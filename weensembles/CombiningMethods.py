@@ -160,7 +160,7 @@ def _averaging_coefs(X, y, val_X=None, val_y=None, calibrate=False, comb_probs=F
     return coefs.expand(k, k, -1)
 
 
-def _grad_comb(X, y, wle, coupling_method, verbose=0, epochs=10, lr=0.01, momentum=0.9, test_period=None, batch_sz=500):
+def _grad_comb(X, y, wle, coupling_method, verbose=0, epochs=10, lr=0.3, momentum=0.85, test_period=None, batch_sz=500):
     """Trains combining coefficients in end-to-end manner by gradient descent method.
 
     Args:
