@@ -8,7 +8,8 @@ from torch.special import expit
 import numpy as np
 from abc import ABC, abstractmethod
 
-from weensembles.CalibrationMethod import TemperatureScaling
+from weensembles.CalibrationMethod import CalibrationMethod, TemperatureScaling
+from weensembles.CouplingMethods import coup_picker
 from weensembles.predictions_evaluation import compute_acc_topk, compute_nll
 from weensembles.utils import cuda_mem_try
 
@@ -22,12 +23,13 @@ class GeneralCombiner(ABC):
         GeneralCombiner: Combining method. Doesn't hold coefficients.
     """
     
-    def __init__(self, req_val=False, fit_pairwise=False, combine_probs=False, device="cpu", dtype=torch.float):
+    def __init__(self, req_val=False, fit_pairwise=False, combine_probs=False, device="cpu", dtype=torch.float, name="no_name"):
         self.req_val_ = req_val
         self.fit_pairwise_ = fit_pairwise
         self.combine_probs_ = combine_probs
         self.dev_ = device
         self.dtp_ = dtype
+        self.name_ = name
         
     @abstractmethod
     def train(self, X, y, val_X=None, val_y=None, wle=None, verbose=0):
@@ -262,11 +264,9 @@ def _grad_comb(X, y, wle, coupling_method, verbose=0, epochs=10, lr=0.01, moment
 
 class lda(GeneralCombiner):
     """Combining method which uses Linear DIscriminant Analysis to infer combining coefficients.
-
     """
-
-    def __init__(self, device="cpu", dtype=torch.float):
-        super().__init__(req_val=False, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype)
+    def __init__(self, name, device="cpu", dtype=torch.float):
+        super().__init__(req_val=False, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype, name=name)
         
     def train(self, X, y, val_X=None, val_y=None, wle=None, verbose=0):
         """Trains lda model for a pair of classes and outputs its coefficients.
@@ -294,8 +294,8 @@ class lda(GeneralCombiner):
 class logreg(GeneralCombiner):
     """Combining method which uses Logistic Regression to infer combining coefficients.
     """
-    def __init__(self, device="cpu", dtype=torch.float):
-        super().__init__(req_val=False, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype)
+    def __init__(self, name, device="cpu", dtype=torch.float):
+        super().__init__(req_val=False, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype, name=name)
         
     def train(self, X, y, val_X=None, val_y=None, wle=None, verbose=0):
         """Trains logistic regression model for a pair of classes and outputs its coefficients.
@@ -323,8 +323,8 @@ class logreg(GeneralCombiner):
 class logreg_no_interc(GeneralCombiner):
     """Combining method which uses Logistic Regression without intercept to infer combining coefficients.
     """
-    def __init__(self, device="cpu", dtype=torch.float):
-        super().__init__(req_val=False, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype)
+    def __init__(self, name, device="cpu", dtype=torch.float):
+        super().__init__(req_val=False, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype, name=name)
         
     def train(self, X, y, val_X=None, val_y=None, wle=None, verbose=0):
         """Trains logistic regression model without intercept for a pair of classes and outputs its coefficients.
@@ -353,8 +353,8 @@ class logreg_sweep_C(GeneralCombiner):
     """Combining method which uses Logistic Regression to infer combining coefficients. 
     Value of regularization parameter C of Logistic Regression is first determined via hyperparameter sweep.
     """
-    def __init__(self, device="cpu", dtype=torch.float):
-        super().__init__(req_val=True, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype)
+    def __init__(self, name, device="cpu", dtype=torch.float):
+        super().__init__(req_val=True, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype, name=name)
         
     def train(self, X, y, val_X, val_y, wle=None, verbose=0):
         """Trains logistic regression model for a pair of classes and outputs its coefficients.
@@ -380,8 +380,8 @@ class logreg_no_interc_sweep_C(GeneralCombiner):
     """Combining method which uses Logistic Regression without intercept to infer combining coefficients. 
     Value of regularization parameter C of Logistic Regression is first determined via hyperparameter sweep.
     """
-    def __init__(self, device="cpu", dtype=torch.float):
-        super().__init__(req_val=True, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype)
+    def __init__(self, name, device="cpu", dtype=torch.float):
+        super().__init__(req_val=True, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype, name=name)
         
     def train(self, X, y, val_X, val_y, wle=None, verbose=0):
         """Trains logistic regression model for a pair of classes and outputs its coefficients.
@@ -406,8 +406,9 @@ class logreg_no_interc_sweep_C(GeneralCombiner):
 class average(GeneralCombiner):
     """Combining method which averages logits of combined classifiers.
     """
-    def __init__(self, device="cpu", dtype=torch.float):
-        super().__init__(req_val=False, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype)
+    def __init__(self, name, calibrate, device="cpu", dtype=torch.float):
+        super().__init__(req_val=False, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype, name=name)
+        self.calibrate_ = calibrate
         
     def train(self, X, y, val_X=None, val_y=None, wle=None, verbose=0):
         """Computes and outputs coefficients for averaging model.
@@ -424,91 +425,16 @@ class average(GeneralCombiner):
         Returns:
             torch.tensor: Computed coefficients. Tensor of shape k × k × (c + 1), where k is number of classes and c in number of combined classifiers.
         """
-        coefs = _averaging_coefs(X=X, y=y, calibrate=False, comb_probs=False, device=self.dev_, dtype=self.dtp_, verbose=verbose)
+        coefs = _averaging_coefs(X=X, y=y, calibrate=self.calibrate_, comb_probs=self.combine_probs_, device=self.dev_, dtype=self.dtp_, verbose=verbose)
         return coefs        
 
 
-class cal_average(GeneralCombiner):
-    """Combining method which uses coefficients inversely proportional to Temperature Scaling temperatures.
-    Logits of combined classifiers are combined, not calibrated probabilities.
+class grad(GeneralCombiner):
+    """Combining method which trains its coefficient in an end-to-end manner using gradient descent.
     """
-    def __init__(self, device="cpu", dtype=torch.float):
-        super().__init__(req_val=True, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype)
-        
-    def train(self, X, y, val_X, val_y, wle=None, verbose=0):
-        """Computes and outputs coefficients for averaging model.
-
-        Args:
-            X (tensor): Training predictors. Tensor of shape c × n × k, where c is number of combined classifiers, n is numbe of training samples and k is numbe rof classes.
-            y (tensor): Training labels. Tensor of shape n - number of training samples.
-            val_X (None, optional): Validation predictors. Tensor of shape c × n × k, where c is number of combined classifiers, 
-            n is numbe of training samples and k is numbe rof classes. Defaults to None.
-            val_y (None, optional): Validation labels. Tensor of shape n - number of validation samples. Defaults to None.
-            wle (None, optional): Not used. Defaults to None.
-            verbose (int, optional): Verbosity level. Defaults to 0.
-        
-        Returns:
-            torch.tensor: Computed coefficients. Tensor of shape k × k × (c + 1), where k is number of classes and c in number of combined classifiers.
-        """
-        coefs = _averaging_coefs(X=X, y=y, val_X=val_X, val_y=val_y, calibrate=True, comb_probs=False, device=self.dev_, dtype=self.dtp_, verbose=verbose)
-        return coefs
-
-
-class prob_average(GeneralCombiner):
-    """Combining method which averages pairwise probabilities obtained from combined classifiers.
-    """
-    def __init__(self, device="cpu", dtype=torch.float):
-        super().__init__(req_val=False, fit_pairwise=False, combine_probs=True, device=device, dtype=dtype)
-        
-    def train(self, X, y, val_X=None, val_y=None, wle=None, verbose=0):
-        """Computes and outputs coefficients for averaging model.
-
-        Args:
-            X (tensor): Training predictors. Tensor of shape c × n × k, where c is number of combined classifiers, n is numbe of training samples and k is numbe rof classes.
-            y (tensor): Training labels. Tensor of shape n - number of training samples.
-            val_X (None, optional): Validation predictors. Tensor of shape c × n × k, where c is number of combined classifiers, 
-            n is numbe of training samples and k is numbe rof classes. Defaults to None.
-            val_y (None, optional): Validation labels. Tensor of shape n - number of validation samples. Defaults to None.
-            wle (None, optional): Not used. Defaults to None.
-            verbose (int, optional): Verbosity level. Defaults to 0.
-        
-        Returns:
-            torch.tensor: Computed coefficients. Tensor of shape k × k × (c + 1), where k is number of classes and c in number of combined classifiers.
-        """
-        coefs = _averaging_coefs(X=X, y=y, calibrate=False, comb_probs=True, device=self.dev_, dtype=self.dtp_, verbose=verbose)
-        return coefs 
-
-
-class cal_prob_average(GeneralCombiner):
-    """Combining method which calibrates combined classifiers and then averages pairwise probabilities obtained from them.
-    """
-    def __init__(self, device="cpu", dtype=torch.float):
-        super().__init__(req_val=True, fit_pairwise=False, combine_probs=True, device=device, dtype=dtype)
-        
-    def train(self, X, y, val_X, val_y, wle=None, verbose=0):
-        """Computes and outputs coefficients for averaging model.
-
-        Args:
-            X (tensor): Training predictors. Tensor of shape c × n × k, where c is number of combined classifiers, n is numbe of training samples and k is numbe rof classes.
-            y (tensor): Training labels. Tensor of shape n - number of training samples.
-            val_X (None, optional): Validation predictors. Tensor of shape c × n × k, where c is number of combined classifiers, 
-            n is numbe of training samples and k is numbe rof classes. Defaults to None.
-            val_y (None, optional): Validation labels. Tensor of shape n - number of validation samples. Defaults to None.
-            wle (None, optional): Not used. Defaults to None.
-            verbose (int, optional): Verbosity level. Defaults to 0.
-        
-        Returns:
-            torch.tensor: Computed coefficients. Tensor of shape k × k × (c + 1), where k is number of classes and c in number of combined classifiers.
-        """
-        coefs = _averaging_coefs(X=X, y=y, val_X=val_X, val_y=val_y, calibrate=True, comb_probs=True, device=self.dev_, dtype=self.dtp_, verbose=verbose)
-        return coefs
-
-
-class grad_m1(GeneralCombiner):
-    """Combining method which trains its coefficient in an end-to-end manner using gradient descent. Coupling method m1 is used.
-    """
-    def __init__(self, device="cpu", dtype=torch.float):
-        super().__init__(req_val=False, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype)
+    def __init__(self, coupling_method, name, device="cpu", dtype=torch.float):
+        super().__init__(req_val=False, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype, name=name)
+        self.coupling_m_ = coupling_method
         
     def train(self, X, y, val_X, val_y, wle, verbose=0):
         """Computes and outputs coefficients.
@@ -525,73 +451,25 @@ class grad_m1(GeneralCombiner):
         Returns:
             torch.tensor: Computed coefficients. Tensor of shape k × k × (c + 1), where k is number of classes and c in number of combined classifiers.
         """
-        return _grad_comb(X=X, y=y, wle=wle, coupling_method="m1", verbose=verbose)
+        return _grad_comb(X=X, y=y, wle=wle, coupling_method=self.coupling_m_, verbose=verbose)
 
        
-class grad_m2(GeneralCombiner):
-    """Combining method which trains its coefficient in an end-to-end manner using gradient descent. Coupling method m2 is used.
-    """
-    def __init__(self, device="cpu", dtype=torch.float):
-        super().__init__(req_val=False, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype)
-        
-    def train(self, X, y, val_X, val_y, wle, verbose=0):
-        """Computes and outputs coefficients.
-
-        Args:
-            X (tensor): Training predictors. Tensor of shape c × n × k, where c is number of combined classifiers, n is numbe of training samples and k is numbe rof classes.
-            y (tensor): Training labels. Tensor of shape n - number of training samples.
-            val_X (None, optional): Validation predictors. Tensor of shape c × n × k, where c is number of combined classifiers, 
-            n is numbe of training samples and k is numbe rof classes. Defaults to None.
-            val_y (None, optional): Validation labels. Tensor of shape n - number of validation samples. Defaults to None.
-            wle (None, optional): Not used. Defaults to None.
-            verbose (int, optional): Verbosity level. Defaults to 0.
-        
-        Returns:
-            torch.tensor: Computed coefficients. Tensor of shape k × k × (c + 1), where k is number of classes and c in number of combined classifiers.
-        """
-        return _grad_comb(X=X, y=y, wle=wle, coupling_method="m2", verbose=verbose)
-
-
-class grad_bc(GeneralCombiner):
-    """Combining method which trains its coefficient in an end-to-end manner using gradient descent. Coupling method bc is used.
-    """
-    def __init__(self, device="cpu", dtype=torch.float):
-        super().__init__(req_val=False, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype)
-        
-    def train(self, X, y, val_X, val_y, wle, verbose=0):
-        """Computes and outputs coefficients.
-
-        Args:
-            X (tensor): Training predictors. Tensor of shape c × n × k, where c is number of combined classifiers, n is numbe of training samples and k is numbe rof classes.
-            y (tensor): Training labels. Tensor of shape n - number of training samples.
-            val_X (None, optional): Validation predictors. Tensor of shape c × n × k, where c is number of combined classifiers, 
-            n is numbe of training samples and k is numbe rof classes. Defaults to None.
-            val_y (None, optional): Validation labels. Tensor of shape n - number of validation samples. Defaults to None.
-            wle (None, optional): Not used. Defaults to None.
-            verbose (int, optional): Verbosity level. Defaults to 0.
-        
-        Returns:
-            torch.tensor: Computed coefficients. Tensor of shape k × k × (c + 1), where k is number of classes and c in number of combined classifiers.
-        """
-        return _grad_comb(X=X, y=y, wle=wle, coupling_method="bc", verbose=verbose)
-
-                      
-comb_methods = {"lda": lda,
-                "logreg": logreg,
-                "logreg_no_interc": logreg_no_interc,
-                "logreg_sweep_C": logreg_sweep_C,
-                "logreg_no_interc_sweep_C": logreg_no_interc_sweep_C,
-                "average": average,
-                "cal_average": cal_average,
-                "prob_average": prob_average,
-                "cal_prob_average": cal_prob_average,
-                "grad_m1": grad_m1,
-                "grad_m2": grad_m2,
-                "grad_bc": grad_bc}
+comb_methods = {"lda": [lda, {}],
+                "logreg": [logreg, {}],
+                "logreg_no_interc": [logreg_no_interc, {}],
+                "logreg_sweep_C": [logreg_sweep_C, {}],
+                "logreg_no_interc_sweep_C": [logreg_no_interc_sweep_C, {}],
+                "average": [average, {"calibrate": False, "combine_probs": False}],
+                "cal_average": [average, {"calibrate": True, "combine_probs": False}],
+                "prob_average": [average, {"calibrate": False, "combine_probs": True}],
+                "cal_prob_average": [average, {"calibrate": True, "combine_probs": True}],
+                "grad_m1": [grad, {"coupling_method": "m1"}],
+                "grad_m2": [grad, {"coupling_method": "m2"}],
+                "grad_bc": [grad, {"coupling_method": "bc"}]}
 
 
 def comb_picker(co_m, device="cpu", dtype=torch.float):
     if co_m not in comb_methods:
         return None 
     
-    return comb_methods[co_m](device=device, dtype=dtype)
+    return comb_methods[co_m][0](device=device, dtype=dtype, name=co_m, **comb_methods[co_m][1])

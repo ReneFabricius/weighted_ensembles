@@ -55,7 +55,7 @@ class WeightedLinearEnsemble:
         
         inc_val = comb_m.req_val_
         if inc_val and (MP_val is None or tar_val is None):
-            print("MP_val and tar_val are required for combining method {}".format(comb_m.__name__))
+            print("MP_val and tar_val are required for combining method {}".format(combining_method))
             return 1
         
         num = self.k_ * (self.k_ - 1) // 2      # Number of pairs of classes
@@ -169,7 +169,7 @@ class WeightedLinearEnsemble:
             return 1
         
         if verbose > 0:
-            print("Starting predict proba, coupling method {}".format(coup_m.__name__))
+            print("Starting predict proba, coupling method {}".format(coupling_method))
         if not self.trained_:
             print("Ensemble not trained")
             return
