@@ -15,6 +15,7 @@ def m1(PP, verbose=0):
     dtype = PP.dtype
     n, k, kk = PP.size()
     assert k == kk
+    PP = PP * (1 - torch.eye(k, k, device=device))
     if verbose > 1:
         print("Working with {} samples, each with {} classes".format(n, k))
         if verbose > 2:
@@ -59,6 +60,7 @@ def m2(PP, verbose=0):
     n, k, kk = PP.size()
     assert k == kk
 
+    PP = PP * (1 - torch.eye(k, k, device=device))
     es = torch.ones(n, k, 1, dtype=dtype, device=device)
     zs = torch.zeros(n, 1, 1, device=device, dtype=dtype)
     B = torch.zeros(n, k + 1, 1, device=device, dtype=dtype)
@@ -101,6 +103,7 @@ def m2_iter(PP, verbose=0):
     n, k, kk = PP.size()
     assert k == kk
 
+    PP = PP * (1 - torch.eye(k, k, device=device))
     max_iter = max(100, k)  # As per LIBSVM implementation
     eps = 1e-12 / k
     min_prob = (1e-16 if dtype == torch.float64 else 1e-7)  # As per LIBSVM
@@ -167,6 +170,7 @@ def bc(PP, verbose=0):
     assert k == kk
     eps = 1e-5
 
+    PP = PP * (1 - torch.eye(k, k, device=device))
     MMi = (1/k)*(torch.eye(k - 1, device=device, dtype=dtype) + torch.ones(k - 1, k - 1, device=device, dtype=dtype))
     rws = int(k * (k - 1) / 2)
     # Mapping h is used such that elements of {1, ..., k(k-1)/2}
@@ -217,16 +221,19 @@ def sbt(PP, verbose=0):
     :param verbose: print detailed output
     :return: n×k tensor of probability vectors
     """
+    
+    dtp = PP.dtype
+    dev = PP.device
+
     start = timer()
     n, k, kk = PP.shape
     assert(k == kk)
+    PP = PP * (1 - torch.eye(k, k, device=dev))
     if verbose > 1:
         print("Working with {} samples, each with {} classes".format(n, k))
         if verbose > 2:
             print("Solving for pairwise probabilities\n{}".format(PP.cpu().numpy()))
 
-    dtp = PP.dtype
-    dev = PP.device
     ey = torch.eye(k, dtype=dtp, device=dev)
     R_zd = PP * (1 - ey)
     ND = torch.div(1, ey + R_zd.transpose(dim0=-2, dim1=-1)) - 1 + ey
