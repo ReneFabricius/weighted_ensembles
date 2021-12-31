@@ -4,6 +4,7 @@ import pickle
 import pandas as pd
 from scipy.stats import normaltest
 from timeit import default_timer as timer
+from torch.special import expit
 
 from weensembles.CouplingMethods import coup_picker
 from weensembles.CombiningMethods import comb_picker
@@ -121,6 +122,7 @@ class WeightedLinearEnsemble:
                         pw_coefs = comb_m.train(X=X, y=y, wle=self, verbose=verbose)
                         
                     self.coefs_[fc, sc, :] = pw_coefs
+                    self.coefs_[sc, fc, :] = pw_coefs
 
                     if verbose > 1:
                         pwacc = pairwise_accuracies(SS, y)
@@ -439,6 +441,99 @@ class WeightedLinearEnsemble:
         end = timer()
         if verbose > 0:
             print("Predict proba topl fast finished in " + str(end - start) + " s")
+
+        return ps_full
+
+    def predict_proba_topl_fast_simple(self, MP, l, coupling_method, batch_size=None, verbose=0, coefs=None, combine_probs=None):
+        """
+        Better optimized version of predict_proba_topl
+        Combines outputs of constituent classifiers using only those classes, which are among the top l most probable
+        for some constituent classifier.
+        :param MP: MP: c x n x k tensor of constituent classifiers posteriors
+        c - number of constituent classifiers, n - number of training samples, k - number of classes
+        :param l: how many most probable classes for each constituent classifier to consider
+        :param coupling_method: coupling method to use
+        :param batch_size: if not none, the size of the batches to use
+        :return: n x k tensor of combined posteriors
+        """
+        if verbose > 0:
+            print("Starting predict proba topl fast")
+        coup_m = coup_picker(coupling_method)
+        if coup_m is None:
+            print("Unknown coupling method {} selected".format(coupling_method))
+            return 1
+ 
+        if not self.trained_ and coefs is None:
+            print("Ensemble not trained")
+            return
+        start = timer()
+        c, n, k = MP.size()
+        assert c == self.c_
+        assert k == self.k_
+
+        b_size = batch_size if batch_size is not None else n
+        ps_list = []
+
+        for start_ind in range(0, n, b_size):
+            curMP = MP[:, start_ind:(start_ind + b_size), :].to(device=self.dev_, dtype=self.dtp_)
+            curn = curMP.shape[1]
+
+            # ind is c x n x l tensor of top l indices for each sample in each network output
+            val, ind = torch.topk(curMP, l, dim=2)
+            M = torch.zeros(curMP.shape, dtype=torch.bool, device=self.dev_)
+            # place true in positions of top probs
+            # c x n x k tensor
+            M.scatter_(2, ind, True)
+            # combine selections over c inputs
+            # n x k tensor containing for each sample a mask of union of top l classes from each constituent classifier
+            M = torch.sum(M, dim=0, dtype=torch.bool)
+            ps = torch.zeros(curn, k, device=self.dev_, dtype=self.dtp_)
+            # Selected class counts for every n
+            NPC = torch.sum(M, 1).squeeze()
+            # goes over possible numbers of classes in union of top l classes from each constituent classifier
+            for pc in range(l, l * c + 1):
+                # Pick those samples which have pc classes in the union
+                # pcn x c x k tensor
+                pcMP = curMP[:, NPC == pc]
+                # Pick pc-class masks
+                # pcn x k tensor
+                pcM = M[NPC == pc]
+                # Number of samples with pc classes in the union
+                pcn = pcM.shape[0]
+                if pcn == 0:
+                    continue
+                
+                # pcn x pc x c tensor of picked supports
+                picked_supports = pcMP[:, pcM].reshape(c, pcn, pc).transpose(0, 1).transpose(1, 2)
+                exp_supports = picked_supports.unsqueeze(2).expand(pcn, pc, pc, c)
+                # pcn x pc x pc x c tensor of pairwise supports
+                pw_supports = exp_supports - exp_supports.transpose(1, 2)
+                
+                pc_coef_M = pcM.unsqueeze(2).expand(pcn, k, k) * pcM.unsqueeze(1).expand(pcn, k, k)
+                if coefs is None:
+                    pc_coefs = self.coefs_.unsqueeze(0).expand(pcn, k, k, c + 1)[pc_coef_M, :].reshape(pcn, pc, pc, c + 1)
+                else:
+                    pc_coefs = coefs.unsqueeze(0).expand(pcn, k, k, c + 1)[pc_coef_M, :].reshape(pcn, pc, pc, c + 1)
+                
+                Ws = pc_coefs[:, :, :, 0:-1]
+                Bs = pc_coefs[:, :, :, -1]
+                
+                pw_w_supports = pw_supports * Ws
+                if (combine_probs is None and self.comb_model_.combine_probs_) or combine_probs:
+                    pw_probs = expit(pw_w_supports)
+                    pcR = torch.mean(pw_probs, dim=-1)
+                else:
+                    pcR = expit(torch.sum(pw_w_supports, dim=-1) + Bs)
+
+                pc_probs = coup_m(pcR)
+                ps[NPC == pc][pcM] = torch.flatten(pc_probs)
+            
+            ps_list.append(ps)
+
+        ps_full = torch.cat(ps_list, dim=0)
+        end = timer()
+        if verbose > 0:
+            print("Predict proba topl fast simple finished in " + str(end - start) + " s")
 
         return ps_full
 
