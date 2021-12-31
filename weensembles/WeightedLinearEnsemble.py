@@ -4,6 +4,7 @@ import pickle
 import pandas as pd
 from scipy.stats import normaltest
 from timeit import default_timer as timer
+from torch._C import device
 from torch.special import expit
 
 from weensembles.CouplingMethods import coup_picker
@@ -526,7 +527,9 @@ class WeightedLinearEnsemble:
                     pcR = expit(torch.sum(pw_w_supports, dim=-1) + Bs)
 
                 pc_probs = coup_m(pcR)
-                ps[NPC == pc][pcM] = torch.flatten(pc_probs)
+                pc_ps = torch.zeros(pcn, k, device=self.dev_, dtype=self.dtp_)
+                pc_ps[pcM] = torch.flatten(pc_probs)
+                ps[NPC == pc] = pc_ps
             
             ps_list.append(ps)
 
