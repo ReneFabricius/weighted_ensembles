@@ -526,7 +526,7 @@ class WeightedLinearEnsemble:
                 else:
                     pcR = expit(torch.sum(pw_w_supports, dim=-1) + Bs)
 
-                pc_probs = coup_m(pcR)
+                pc_probs = coup_m(pcR, verbose=verbose)
                 pc_ps = torch.zeros(pcn, k, device=self.dev_, dtype=self.dtp_)
                 pc_ps[pcM] = torch.flatten(pc_probs)
                 ps[NPC == pc] = pc_ps
