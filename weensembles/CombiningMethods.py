@@ -519,7 +519,7 @@ class grad(GeneralCombiner):
     """Combining method which trains its coefficient in an end-to-end manner using gradient descent.
     """
     def __init__(self, c, k, coupling_method, name, device="cpu", dtype=torch.float):
-        super().__init__(c=c, k=k, req_val=False, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype, name=name)
+        super().__init__(c=c, k=k, req_val=True, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype, name=name)
         self.coupling_m_ = coupling_method
         
     def train(self, X, y, val_X, val_y, verbose=0):
@@ -537,7 +537,7 @@ class grad(GeneralCombiner):
         Returns:
             torch.tensor: Computed coefficients. Tensor of shape k × k × (c + 1), where k is number of classes and c in number of combined classifiers.
         """
-        return _grad_comb(X=X, y=y, combiner=self, coupling_method=self.coupling_m_, verbose=verbose)
+        return _grad_comb(X=val_X, y=val_y, combiner=self, coupling_method=self.coupling_m_, verbose=verbose)
 
        
 comb_methods = {"lda": [lda, {}],
