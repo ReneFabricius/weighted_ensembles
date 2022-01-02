@@ -80,9 +80,17 @@ class CalibrationEnsemble:
         """
         if verbose > 0:
             print("Saving models into file: " + str(file))
-        dump_dict = {"models": self.cal_models_, "c": self.c_, "k": self.k_}
+        
+        for cal_m in self.cal_models_:
+            if cal_m is not None:
+                cal_m.to_cpu()
+        
         with open(file, 'wb') as f:
-            pickle.dump(dump_dict, f)
+            pickle.dump(self.__dict__, f)
+            
+        for cal_m in self.cal_models_:
+            if cal_m is not None:
+                cal_m.to_dev()
 
     @torch.no_grad()
     def load(self, file, verbose=0):
@@ -95,13 +103,12 @@ class CalibrationEnsemble:
             print("Loading models from file: " + str(file))
         with open(file, 'rb') as f:
             dump_dict = pickle.load(f)
-            if dump_dict["c"] != len(dump_dict["models"]):
-                print("Wrong number of models/classifiers")
-                return 1
-
-            self.cal_models_ = dump_dict["models"]
-            self.c_ = dump_dict["c"]
-            self.k_ = dump_dict["k"]
+            
+        self.__dict__.update(dump_dict)
+        
+        for cal_m in self.cal_models_:
+            if cal_m is not None:
+                cal_m.to_dev()
 
     @torch.no_grad()
     def save_coefs_csv(self, file):

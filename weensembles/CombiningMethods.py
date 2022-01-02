@@ -1,4 +1,5 @@
 import re
+from textwrap import fill
 import torch
 from timeit import default_timer as timer
 from sklearn.linear_model import LogisticRegression
@@ -23,16 +24,32 @@ class GeneralCombiner(ABC):
         GeneralCombiner: Combining method. Doesn't hold coefficients.
     """
     
-    def __init__(self, c, k, req_val=False, fit_pairwise=False, combine_probs=False, device="cpu", dtype=torch.float, name="no_name"):
-        self.req_val_ = req_val
+    def __init__(self, c, k, req_val=False, fit_pairwise=False, combine_probs=False, uncert=False, device="cpu", dtype=torch.float, name="no_name"):
+        self.req_val_ = req_val or uncert
         self.fit_pairwise_ = fit_pairwise
         self.combine_probs_ = combine_probs
+        self.uncert_ = uncert
         self.dev_ = device
         self.dtp_ = dtype
         self.name_ = name
         self.coefs_ = None
+        self.cal_models_ = None
         self.c_ = c
         self.k_ = k
+        
+    def to_cpu(self):
+        if self.coefs_ is not None:
+            self.coefs_ = self.coefs_.cpu()
+        if self.cal_models_ is not None:
+           for cal_m in self.cal_models_:
+               cal_m.to_cpu()
+                
+    def to_dev(self):
+        if self.coefs_ is not None:
+            self.coefs_ = self.coefs_.to(self.dev_)
+        if self.cal_models_ is not None:
+            for cal_m in self.cal_models_:
+                cal_m.to_dev()
         
     def fit(self, X, y, val_X=None, val_y=None, verbose=0):
         """
@@ -51,6 +68,13 @@ class GeneralCombiner(ABC):
         start = timer()
         num = self.k_ * (self.k_ - 1) // 2      # Number of pairs of classes
         print_step = num // 100
+        
+        if self.uncert_:
+            self.cal_models_ = []
+            for cler_i in range(self.c_):
+                cal_m = TemperatureScaling(device=self.dev_, dtp=self.dtp_)
+                cal_m.fit(logit_pred=val_X[cler_i], tar=val_y, verbose=verbose)
+                self.cal_models_.append(cal_m)
 
         if self.fit_pairwise_:
             self.coefs_ = torch.zeros(self.k_, self.k_, self.c_ + 1, device=self.dev_, dtype=self.dtp_)
@@ -142,7 +166,7 @@ class GeneralCombiner(ABC):
             print("Unknown coupling method {} selected".format(coupling_method))
             return 1
  
-        if self.coefs_ is None and coefs is None: 
+        if (self.coefs_ is None and coefs is None) or (self.uncert_ and self.cal_models_ is None): 
             print("Ensemble not trained")
             return
         start = timer()
@@ -158,6 +182,14 @@ class GeneralCombiner(ABC):
         for start_ind in range(0, n, b_size):
             curMP = X[:, start_ind:(start_ind + b_size), :].to(device=self.dev_, dtype=self.dtp_)
             curn = curMP.shape[1]
+            
+            if self.uncert_:
+                cur_cal_probs = []
+                for ci in range(c):
+                    ccp = self.cal_models_[ci].predict_proba(logit_pred=curMP[ci])
+                    cur_cal_probs.append(ccp.unsqueeze(0))
+                
+                curMPprob = torch.cat(cur_cal_probs, dim=0) 
 
             # ind is c x n x l tensor of top l indices for each sample in each network output
             val, ind = torch.topk(curMP, l, dim=2)
@@ -174,11 +206,12 @@ class GeneralCombiner(ABC):
             # goes over possible numbers of classes in union of top l classes from each constituent classifier
             for pc in range(l, l * c + 1):
                 # Pick those samples which have pc classes in the union
+                samplM = NPC == pc
                 # pcn x c x k tensor
-                pcMP = curMP[:, NPC == pc]
+                pcMP = curMP[:, samplM]
                 # Pick pc-class masks
                 # pcn x k tensor
-                pcM = M[NPC == pc]
+                pcM = M[samplM]
                 # Number of samples with pc classes in the union
                 pcn = pcM.shape[0]
                 if pcn == 0:
@@ -190,6 +223,7 @@ class GeneralCombiner(ABC):
                 # pcn x pc x pc x c tensor of pairwise supports
                 pw_supports = exp_supports - exp_supports.transpose(1, 2)
                 
+                                
                 pc_coef_M = pcM.unsqueeze(2).expand(pcn, k, k) * pcM.unsqueeze(1).expand(pcn, k, k)
                 if coefs is None:
                     pc_coefs = self.coefs_.unsqueeze(0).expand(pcn, k, k, c + 1)[pc_coef_M, :].reshape(pcn, pc, pc, c + 1)
@@ -205,6 +239,18 @@ class GeneralCombiner(ABC):
                     pcR = torch.mean(pw_probs, dim=-1)
                 else:
                     pcR = expit(torch.sum(pw_w_supports, dim=-1) + Bs)
+                 
+                if self.uncert_:
+                    pcMPprob = curMPprob[:, samplM]
+                    picked_probs = pcMPprob[:, pcM].reshape(c, pcn, pc).transpose(0, 1).transpose(1, 2)
+                    exp_probs = picked_probs.unsqueeze(2).expand(pcn, pc, pc, c)
+                    coup_probs = exp_probs + exp_probs.transpose(1, 2)
+                    # pcn x pc x pc tensor
+                    coupR = torch.mean(coup_probs, dim=-1)
+                    # coupR contains average of calibrated probabilities that a sample belongs to one of the classes given by indices of the last two dimensions    
+                    uncR = torch.full_like(input=pcR, fill_value=0.5)
+                    # Add uncertainty to pairwise probabilities according to coupR
+                    pcR = coupR * pcR + (1.0 - coupR) * uncR
 
                 pc_probs = coup_m(pcR, verbose=verbose)
                 pc_ps = torch.zeros(pcn, k, device=self.dev_, dtype=self.dtp_)
@@ -430,8 +476,8 @@ def _grad_comb(X, y, combiner, coupling_method, verbose=0, epochs=10, lr=0.3, mo
 class lda(GeneralCombiner):
     """Combining method which uses Linear DIscriminant Analysis to infer combining coefficients.
     """
-    def __init__(self, c, k, name, device="cpu", dtype=torch.float):
-        super().__init__(c=c, k=k, req_val=False, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype, name=name)
+    def __init__(self, c, k, uncert, name, device="cpu", dtype=torch.float):
+        super().__init__(c=c, k=k, uncert=uncert, req_val=False, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype, name=name)
         
     def train(self, X, y, val_X=None, val_y=None, verbose=0):
         """Trains lda model for a pair of classes and outputs its coefficients.
@@ -459,8 +505,8 @@ class lda(GeneralCombiner):
 class logreg(GeneralCombiner):
     """Combining method which uses Logistic Regression to infer combining coefficients.
     """
-    def __init__(self, c, k, fit_interc, sweep_C, name, req_val, device="cpu", dtype=torch.float):
-        super().__init__(c=c, k=k, req_val=req_val, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype, name=name)
+    def __init__(self, c, k, fit_interc, sweep_C, name, req_val, uncert, device="cpu", dtype=torch.float):
+        super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype, name=name)
         self.fit_interc_ = fit_interc
         self.sweep_C_ = sweep_C
         
@@ -493,8 +539,8 @@ class logreg(GeneralCombiner):
 class average(GeneralCombiner):
     """Combining method which averages logits of combined classifiers.
     """
-    def __init__(self, c, k, name, calibrate, combine_probs, req_val, device="cpu", dtype=torch.float):
-        super().__init__(c=c, k=k, req_val=req_val, fit_pairwise=False, combine_probs=combine_probs, device=device, dtype=dtype, name=name)
+    def __init__(self, c, k, name, calibrate, combine_probs, req_val, uncert, device="cpu", dtype=torch.float):
+        super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=False, combine_probs=combine_probs, device=device, dtype=dtype, name=name)
         self.calibrate_ = calibrate
         
     def train(self, X, y, val_X=None, val_y=None, wle=None, verbose=0):
@@ -518,8 +564,8 @@ class average(GeneralCombiner):
 class grad(GeneralCombiner):
     """Combining method which trains its coefficient in an end-to-end manner using gradient descent.
     """
-    def __init__(self, c, k, coupling_method, name, device="cpu", dtype=torch.float):
-        super().__init__(c=c, k=k, req_val=True, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype, name=name)
+    def __init__(self, c, k, coupling_method, uncert, name, device="cpu", dtype=torch.float):
+        super().__init__(c=c, k=k, uncert=uncert, req_val=True, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype, name=name)
         self.coupling_m_ = coupling_method
         
     def train(self, X, y, val_X, val_y, verbose=0):
@@ -555,7 +601,9 @@ comb_methods = {"lda": [lda, {}],
 
 
 def comb_picker(co_m, c, k, device="cpu", dtype=torch.float):
-    if co_m not in comb_methods:
-        return None 
+    co_split = co_m.split('.')
+    co_name = co_split[0]
+    if co_name not in comb_methods:
+        return None
     
-    return comb_methods[co_m][0](c=c, k=k, device=device, dtype=dtype, name=co_m, **comb_methods[co_m][1])
+    return comb_methods[co_name][0](c=c, k=k, device=device, dtype=dtype, name=co_m, uncert=co_split[-1] == "uncert", **comb_methods[co_name][1])

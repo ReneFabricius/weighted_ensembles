@@ -88,12 +88,14 @@ class WeightedLinearEnsemble:
         """
         if verbose > 0:
             print("Saving ensemble into file: " + str(file))
+        if self.comb_model_ is not None:
+            self.comb_model_.to_cpu()
+
         with open(file, 'wb') as f:
-            if self.comb_model_ is not None and self.comb_model_.coefs_ is not None:
-                self.comb_model_.coefs_ = self.comb_model_.coefs_.cpu()
             pickle.dump(self.__dict__, f)
-            if self.comb_model_ is not None and self.comb_model_.coefs_ is not None:
-                self.comb_model_.coefs_ = self.comb_model_.coefs_.to(self.dev_)
+            
+        if self.comb_model_ is not None:
+            self.comb_model_.to_dev()
 
     @torch.no_grad()
     def load(self, file, verbose=0):
@@ -108,8 +110,8 @@ class WeightedLinearEnsemble:
             dump_dict = pickle.load(f)
 
         self.__dict__.update(dump_dict)
-        if self.comb_model_ is not None and self.comb_model_.coefs_ is not None:
-                self.comb_model_.coefs_ = self.comb_model_.coefs_.to(self.dev_)
+        if self.comb_model_ is not None:
+                self.comb_model_.to_dev()
 
     @torch.no_grad()
     def save_coefs_csv(self, file):

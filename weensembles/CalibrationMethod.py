@@ -39,6 +39,18 @@ class CalibrationMethod(ABC):
         :return: Model coefficients in the form of a pandas DataFrame
         """
         pass
+    
+    @abc.abstractmethod
+    def to_cpu():
+        """Moves tensor attributes to cpu.
+        """
+        pass
+    
+    @abc.abstractmethod
+    def to_dev():
+        """Moves tensor attributes to self.dev_ 
+        """
+        pass
 
 
 class TemperatureScaling(CalibrationMethod):
@@ -50,7 +62,7 @@ class TemperatureScaling(CalibrationMethod):
         :param start_temp: Starting temperature. 1.0 means no change.
         :param max_iter: maximum number of iterations of optimizer
         """
-        self.temp_ = torch.tensor([start_temp], device=device, dtype=dtp, requires_grad=True)
+        self.temp_ = torch.tensor([start_temp], device=device, dtype=dtp)
         self.max_iter_ = max_iter
         self.dev_ = device
         self.dtp_ = dtp
@@ -83,6 +95,7 @@ class TemperatureScaling(CalibrationMethod):
 
         start = timer()
 
+        self.temp_.requires_grad_(True)        
         n, k = logit_pred.shape
 
         if verbose > 1:
@@ -98,7 +111,9 @@ class TemperatureScaling(CalibrationMethod):
             method=solver,
             disp=verbose)
         self.temp_ = opt.x
-
+        
+        self.temp_.requires_grad_(False)
+        
         end = timer()
 
         if verbose > 1:
@@ -118,7 +133,7 @@ class TemperatureScaling(CalibrationMethod):
         :return: n×k tensor of calibrated probabilities.
         """
 
-        sftm = Softmax(dim=1)
+        sftm = Softmax(dim=-1)
 
         if temp is None:
             return sftm(logit_pred / self.temp_.item())
@@ -134,3 +149,11 @@ class TemperatureScaling(CalibrationMethod):
         df = pd.DataFrame(data=coefs, index=[0])
 
         return df
+    
+    @torch.no_grad()
+    def to_cpu(self):
+        self.temp_ = self.temp_.cpu()
+        
+    @torch.no_grad()
+    def to_dev(self):
+        self.temp_ = self.temp_.to(self.dev_)

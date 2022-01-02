@@ -264,8 +264,8 @@ coup_methods = {"m1": m1,
                 "m2_iter": m2_iter,
                 "sbt": sbt}
 
-def coup_picker(co_m):
-    if co_m not in coup_methods:
+def coup_picker(cp_m):
+    if cp_m not in coup_methods:
         return None 
     
-    return coup_methods[co_m]
+    return coup_methods[cp_m]
