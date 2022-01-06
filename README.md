@@ -5,7 +5,7 @@ This ensembling method employs LDA model for combining every pair of classes, th
 
 ## Algorithm description
 WeightedLinearEnsemble training and prediction phases can be described by the following diagram.
-<img src="https://github.com/ReneFabricius/weighted_ensembles/blob/master/Weighted%20LDA%20Flowchart.svg" height="800" />  
+<img src="https://github.com/ReneFabricius/weighted_ensembles/blob/master/Weighted%20Linear%20Ensemble%20Flowchart.svg" height="800" />  
 First, the ensemble constituing probabilistic classifiers need to be obtained. This can be done either by training them, or by using pretrained models.
 Then we need to obtain probabilistic classifications from these constituent models for samples in the LDA training dataset.
 Then we fit the LDA models using these predictions. For fitting the models we can use method *fit* if we are using softmax outputs of the constituent classifiers, 
