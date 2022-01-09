@@ -411,7 +411,7 @@ def _grad_comb(X, y, combiner, coupling_method, verbose=0, epochs=10, lr=0.3, mo
             test_bsz = X.shape[1]
             test_pred = cuda_mem_try(
                 fun=lambda bsz: combiner.predict_proba(X=X, l=k, coupling_method=coupling_method, verbose=max(verbose - 2, 0), batch_size=bsz, coefs=coefs),
-                start_bsz=test_bsz, verbose=verbose)
+                start_bsz=test_bsz, verbose=verbose, device=X.device)
             
             acc = compute_acc_topk(pred=test_pred, tar=y, k=1)
             nll = compute_nll(pred=test_pred, tar=y)
@@ -451,19 +451,20 @@ def _grad_comb(X, y, combiner, coupling_method, verbose=0, epochs=10, lr=0.3, mo
                     finished = True
 
                 except RuntimeError as rerr:
-                    if 'memory' not in str(rerr):
+                    if 'memory' not in str(rerr) and "CUDA" not in str(rerr):
                         raise rerr
                     if verbose > 1:
                         print("OOM Exception")
                     del rerr
                     mbatch_sz = int(0.5 * mbatch_sz)
-                    torch.cuda.empty_cache()
+                    with torch.cuda.device(X.device):
+                        torch.cuda.empty_cache()
             
         if test_period is not None and (e + 1) % test_period == 0:
             with torch.no_grad():
                 test_pred = cuda_mem_try(
                     fun=lambda bsz: combiner.predict_proba(X=X, l=k, coupling_method=coupling_method, verbose=max(verbose - 2, 0), batch_size=bsz, coefs=coefs),
-                    start_bsz=test_bsz, verbose=verbose)
+                    start_bsz=test_bsz, verbose=verbose, device=X.device)
 
                 acc = compute_acc_topk(pred=test_pred, tar=y, k=1)
                 nll = compute_nll(pred=test_pred, tar=y)

@@ -5,6 +5,7 @@ import functools
 from weensembles.predictions_evaluation import compute_acc_topk
 from weensembles.WeightedLinearEnsemble import WeightedLinearEnsemble
 from weensembles.CombiningMethods import logreg
+from weensembles.utils import cuda_mem_try
 
 
 def ensemble_general_test(data_train_path, data_test_path, targets, order, output_folder, output_model_fold, coupling_methods,
@@ -117,31 +118,12 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
     with torch.no_grad():
         for cp_m in coupling_methods:
             print("Testing coupling method " + cp_m)
-            if combining_topl > 0:
-                fin = False
-                tries = 0
-                cur_n = tcs_test.shape[1]
-                while not fin and tries < 20 and cur_n > 0:
-                    if tries > 0:
-                        torch.cuda.empty_cache()
-                        print('Trying again, try {}, batch size {}'.format(tries, cur_n))
-                    try:
-                        PPtl = WE.predict_proba_topl_fast(tcs_test, combining_topl, cp_m, batch_size=cur_n)
-                        fin = True
-                    except RuntimeError as rerr:
-                        if 'memory' not in str(rerr):
-                            raise rerr
-                        print("OOM Exception")
-                        del rerr
-                        cur_n = cur_n // 2
-                        tries += 1
-
-                if not fin:
-                    print('Unsuccessful')
-                    return -1
-
-            else:
-                PPtl = WE.predict_proba(tcs_test, cp_m)
+            PPtl = cuda_mem_try(fun=lambda bsz: WE.predict_proba(MP=tcs_test,
+                                                                 coupling_method=cp_m,
+                                                                 l=combining_topl if combining_topl > 0 else None,
+                                                                 batch_size=bsz),
+                                start_bsz=tcs_test.shape[1],
+                                device=tcs_test.device)
 
             np.save(os.path.join(output_folder, "prob_" + cp_m), PPtl.cpu())
             if has_test_tar:
