@@ -29,7 +29,7 @@ class WeightedLinearEnsemble:
         self.comb_model_ = None 
 
     def fit(self, MP, tar, combining_method,
-            verbose=0, MP_val=None, tar_val=None):
+            verbose=0, MP_val=None, tar_val=None, **kwargs):
         """
         Trains combining method on logits of several classifiers.
         
@@ -56,7 +56,7 @@ class WeightedLinearEnsemble:
             print("MP_val and tar_val are required for combining method {}".format(combining_method))
             return 1
         
-        self.comb_model_.fit(X=MP, y=tar, val_X=MP_val, val_y=tar_val, verbose=verbose)
+        self.comb_model_.fit(X=MP, y=tar, val_X=MP_val, val_y=tar_val, verbose=verbose, **kwargs)
         
             
     @torch.no_grad()

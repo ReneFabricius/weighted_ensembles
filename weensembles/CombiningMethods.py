@@ -14,28 +14,66 @@ from weensembles.CouplingMethods import coup_picker
 from weensembles.predictions_evaluation import compute_acc_topk, compute_nll, compute_pairwise_accuracies
 from weensembles.utils import cuda_mem_try, pairwise_accuracies
 
+
 class GeneralCombiner(ABC):
+    """[summary]
+
+    Args:
+        ABC ([type]): [description]
+
+    Raises:
+        rerr: [description]
+
+    Returns:
+        [type]: [description]
+    """
+    
+    def __init__(self, c, k, req_val, uncert, device, dtype, name):
+        self.req_val_ = req_val or uncert
+        self.uncert_ = uncert
+        self.dev_ = device
+        self.dtp_ = dtype
+        self.name_ = name
+        self.c_ = c
+        self.k_ = k
+        
+    @abstractmethod
+    def to_cpu(self):
+        pass
+    
+    @abstractmethod
+    def to_dev(self):
+        pass
+    
+    @abstractmethod
+    def fit(self, X, y, val_X=None, val_y=None, verbose=0):
+        pass
+
+    @abstractmethod
+    def predict_proba(self, X, coupling_method, l=None, verbose=0, batch_size=None):
+        pass
+    
+    @abstractmethod
+    def score(self, X, y, coupling_method):
+        pass
+ 
+
+class GeneralLinearCombiner(GeneralCombiner):
     """Abstract class for combining methods.
 
     Raises:
         rerr: [description]
 
     Returns:
-        GeneralCombiner: Combining method. Doesn't hold coefficients.
+        GeneralCombiner: Combining method.
     """
     
     def __init__(self, c, k, req_val=False, fit_pairwise=False, combine_probs=False, uncert=False, device="cpu", dtype=torch.float, name="no_name"):
-        self.req_val_ = req_val or uncert
+        super().__init__(c=c, k=k, req_val=req_val, uncert=uncert, device=device, dtype=dtype, name=name)
         self.fit_pairwise_ = fit_pairwise
         self.combine_probs_ = combine_probs
-        self.uncert_ = uncert
-        self.dev_ = device
-        self.dtp_ = dtype
-        self.name_ = name
         self.coefs_ = None
         self.cal_models_ = None
-        self.c_ = c
-        self.k_ = k
         
     def to_cpu(self):
         if self.coefs_ is not None:
@@ -266,23 +304,22 @@ class GeneralCombiner(ABC):
 
         return ps_full
 
-
-    def score(self, X, y, coefs):
+    def score(self, X, y, coupling_method, coefs=None):
         """Computes accuracy of model with given coefficients on given data.
 
         Args:
             X (torch.tensor): Tensor of testing predictions. Shape n × c. Where c is number of combined classifiers and n is number of samples.
             y (torch.tensor): Tensor of correct classes. Shape n - number of samples.
+            coupling_method (string): Coupling method to use for evaluation.
             coefs (torch.tensor): Tensor of model coefficients. Shape 1 × (c + 1). Where c is number of combined classifiers.
 
         Returns:
             float: Top 1 accuracy of model.
         """
-        prob = self.predict_proba(X=X, coefs=coefs)
+        prob = self.predict_proba(X=X, coupling_method=coupling_method, coefs=coefs if coefs is not None else self.coefs_)
         preds = torch.argmax(prob, dim=1)
         return torch.sum(preds == y).item() / len(y)
     
-
 @torch.no_grad()
 def _logreg_sweep_C(X, y, val_X, val_y, fit_intercept=False, verbose=0, device="cpu", dtype=torch.float):
     """
@@ -474,7 +511,7 @@ def _grad_comb(X, y, combiner, coupling_method, verbose=0, epochs=10, lr=0.3, mo
     return coefs
  
 
-class lda(GeneralCombiner):
+class lda(GeneralLinearCombiner):
     """Combining method which uses Linear DIscriminant Analysis to infer combining coefficients.
     """
     def __init__(self, c, k, uncert, name, device="cpu", dtype=torch.float):
@@ -503,7 +540,7 @@ class lda(GeneralCombiner):
         return coefs
 
 
-class logreg(GeneralCombiner):
+class logreg(GeneralLinearCombiner):
     """Combining method which uses Logistic Regression to infer combining coefficients.
     """
     def __init__(self, c, k, fit_interc, sweep_C, name, req_val, uncert, device="cpu", dtype=torch.float):
@@ -537,7 +574,7 @@ class logreg(GeneralCombiner):
         return coefs
 
 
-class average(GeneralCombiner):
+class average(GeneralLinearCombiner):
     """Combining method which averages logits of combined classifiers.
     """
     def __init__(self, c, k, name, calibrate, combine_probs, req_val, uncert, device="cpu", dtype=torch.float):
@@ -562,7 +599,7 @@ class average(GeneralCombiner):
         return coefs        
 
 
-class grad(GeneralCombiner):
+class grad(GeneralLinearCombiner):
     """Combining method which trains its coefficient in an end-to-end manner using gradient descent.
     """
     def __init__(self, c, k, coupling_method, uncert, name, device="cpu", dtype=torch.float):
@@ -586,6 +623,191 @@ class grad(GeneralCombiner):
         """
         return _grad_comb(X=val_X, y=val_y, combiner=self, coupling_method=self.coupling_m_, verbose=verbose)
 
+
+class Net(torch.nn.Module):
+    def __init__(self, c, k, device, dtype):
+        super().__init__()
+        self.c_ = c
+        self.k_ = k
+        self.dev_ = device
+        self.dtp_ = dtype
+        
+        inputs = c * k
+        outputs = k * (k - 1) // 2
+        inc = (outputs / inputs) ** (1 / 3)
+        fc1_o = int(inputs * inc)
+        fc2_o = int(fc1_o * inc)
+        self.fc1 = torch.nn.Linear(in_features=inputs, out_features=fc1_o, device=device, dtype=dtype)
+        self.fc2 = torch.nn.Linear(in_features=fc1_o, out_features=fc2_o, device=device, dtype=dtype)
+        self.fc3 = torch.nn.Linear(in_features=fc2_o, out_features=outputs, device=device, dtype=dtype)
+        self.relu = torch.nn.ReLU(inplace=False)
+        
+    def forward(self, x):
+        x = self.relu(self.fc1(x))
+        x = self.relu(self.fc2(x))
+        x = torch.special.expit(self.fc3(x))
+        
+        return x
+
+class neural(GeneralCombiner):
+    """Combining method emplying simple neural network for inferring matrix of pairwise probabilities from classifiers logits.
+
+    """
+    def __init__(self, c, k, name, coupling_method, device="cpu", dtype=torch.float, uncert=False):
+        """Initializes object.
+
+        Args:
+            c (int): Number of combined classifiers.
+            k (int): Number of classes.
+            name (str): Name of the combining method.
+            coupling_method (str): Coupling method to use for training.
+            device (str, optional): Device to use. Defaults to "cpu".
+            dtype (torch.dtype, optional): Data type to use. Defaults to torch.float.
+            uncert (bool, optional): Currently unused. Defaults to False.
+        """
+        super().__init__(c=c, k=k, req_val=True, uncert=uncert, device=device, dtype=dtype, name=name)
+        self.coupling_m_ = coupling_method
+        self.net_ = Net(c=c, k=k, device=device, dtype=dtype)
+        
+    def to_cpu(self):
+        """Moves data to cpu.
+        """
+        self.net_ = self.net_.cpu()
+
+    def to_dev(self):
+        """Moves data to device specified at creation of the neural object.
+        """
+        self.net_ = self.net_.to(device=self.dev_)
+    
+    def fit(self, val_X, val_y, batch_size=500, lr=0.01, momentum=0, epochs=10, verbose=0, test_period=None, X=None, y=None):
+        """Trains neural network used for inferring R matrix using end-to-end training using provided coupling method and validation data.
+
+        Args:
+            X (None): Not used.
+            y (None): Not used.
+            val_X (torch.tensor): Tensor of training predictions. Shape c x n x k, where c is number of combined classifiers, n is number of samples and k is number of classes. 
+            val_y (torch.tensor): Tensor of training labels. Shape n - number of samples.
+            coupling_method (str): Coupling method to use.
+            batch_size (int, optional): Batch size to use for training. Defaults to 500.
+            lr (float, optional): Learning rate. Defaults to 0.01.
+            momentum (int, optional): Momentum. Defaults to 0.
+            verbose (int, optional): Verbosity level. Defaults to 0.
+        """
+        if verbose > 0:
+            print("Starting neural fit of {}".format(self.name_)) 
+        start = timer()
+        
+        self.net_.train()
+        optimizer = torch.optim.SGD(params=self.net_.parameters(), lr=lr, momentum=momentum)
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=[int(epochs * 1 / 3), int(epochs * 2 / 3)], gamma=0.1)
+        loss_f = torch.nn.NLLLoss()
+        thr_value = 1e-9
+        thresh = torch.nn.Threshold(threshold=thr_value, value=thr_value)
+    
+        c, n, k = val_X.shape
+        assert c == self.c_
+        assert k == self.k_
+        
+        for e in range(epochs):
+            if verbose > 0:
+                print("Processing epoch: {}".format(e))        
+
+            perm = torch.randperm(n=n, device=self.dev_)
+            X_perm = val_X[:, perm]
+            y_perm = val_y[perm]
+            for start_ind in range(0, n, batch_size):
+                optimizer.zero_grad()
+                cur_inp = X_perm[:, start_ind:(start_ind + batch_size)].to(device=self.dev_, dtype=self.dtp_)
+                cur_lab = y_perm[start_ind:(start_ind + batch_size)].to(device=self.dev_)
+                curn = cur_inp.shape[1]
+                pred = cuda_mem_try(
+                    fun=lambda bsz: self.predict_proba(X=cur_inp, coupling_method=self.coupling_m_, verbose=verbose - 1, batch_size=bsz),
+                    start_bsz=curn,
+                    device=self.dev_,
+                    verbose=verbose - 1
+                )
+                loss = loss_f(input=thresh(pred), target=cur_lab)
+                loss.backward()
+                optimizer.step()
+            
+            scheduler.step()
+                
+            if test_period is not None and (e + 1) % test_period == 0:
+                self.net_.eval()
+                with torch.no_grad():
+                    pred = cuda_mem_try(
+                        fun=lambda bsz: self.predict_proba(X=val_X, coupling_method=self.coupling_m_, verbose=verbose - 1, batch_size=bsz),
+                        start_bsz=curn,
+                        device=self.dev_,
+                        verbose=verbose - 1
+                    )
+                    acc = compute_acc_topk(pred=pred, tar=val_y, k=1)
+                    nll = compute_nll(pred=pred, tar=val_y)
+                print("Epoch: {}, training accuracy: {}, training nll: {}".format(e, acc, nll))
+                self.net_.train()
+        
+        self.net_.eval()
+        
+        end = timer()
+        if verbose > 0:
+            print("Fit {} finished in {} s".format(self.name_, end - start))
+
+    def predict_proba(self, X, coupling_method, l=None, verbose=0, batch_size=None):
+        """Predicts probability outputs using own neural network and provided coupling method.
+
+        Args:
+            X (torch.tensor): Tensor of predictions. Shape c x n x k, where c is number of combined classifiers, n is number of samples and k in number of classes.
+            coupling_method (str): Coupling method to use.
+            l (int, optional): Currently unused. Defaults to None.
+            verbose (int, optional): Verbosity level. Defaults to 0.
+            batch_size (int, optional): Batch size. Defaults to None.
+
+        Returns:
+            torch.tensor: Tensor of predicted probabilities. Shape n x k, where n is number of samples and k is number of classes.
+        """
+        c, n, k = X.shape
+        
+        assert c == self.c_
+        assert k == self.k_
+
+        if verbose > 0:
+            print("Starting predict proba of {}".format(self.name_))
+        coup_m = coup_picker(coupling_method)
+        if coup_m is None:
+            print("Unknown coupling method {} selected".format(coupling_method))
+            return 1
+        
+        start = timer()
+        
+        b_size = batch_size if batch_size is not None else n
+        ps_list = []
+
+        for start_ind in range(0, n, b_size):
+            curMP = X[:, start_ind:(start_ind + b_size), :].to(device=self.dev_, dtype=self.dtp_)
+            curn = curMP.shape[1]
+       
+            inp = torch.flatten(curMP.transpose(0, 1), start_dim=1)
+            trii = torch.tril_indices(row=k, col=k, offset=-1, device=self.dev_)
+            out = self.net_(inp)
+            R = torch.zeros((curn, k, k), device=self.dev_, dtype=self.dtp_)
+            R[:, trii[0], trii[1]] = out
+            R = R.transpose(1, 2) + (1.0 - R)
+            ps = coup_m(R)
+            
+            ps_list.append(ps)
+
+        ps_full = torch.cat(ps_list, dim=0)
+        end = timer()
+        if verbose > 0:
+            print("Predict proba neural finished in " + str(end - start) + " s")
+
+        return ps_full
+
+    def score(self, X, y, coupling_method):
+        prob = self.predict_proba(X=X, coupling_method=coupling_method)
+        preds = torch.argmax(prob, dim=1)
+        return torch.sum(preds == y).item() / len(y)
+       
        
 comb_methods = {"lda": [lda, {}],
                 "logreg": [logreg, {"fit_interc": True, "sweep_C": False, "req_val": False}],
@@ -598,7 +820,11 @@ comb_methods = {"lda": [lda, {}],
                 "cal_prob_average": [average, {"calibrate": True, "combine_probs": True, "req_val": True}],
                 "grad_m1": [grad, {"coupling_method": "m1"}],
                 "grad_m2": [grad, {"coupling_method": "m2"}],
-                "grad_bc": [grad, {"coupling_method": "bc"}]}
+                "grad_bc": [grad, {"coupling_method": "bc"}],
+                "neural_m1": [neural, {"coupling_method": "m1"}],
+                "neural_m2": [neural, {"coupling_method": "m2"}],
+                "neural_bc": [neural, {"coupling_method": "bc"}]
+                }
 
 
 def comb_picker(co_m, c, k, device="cpu", dtype=torch.float):
