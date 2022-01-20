@@ -16,16 +16,7 @@ from weensembles.utils import cuda_mem_try, pairwise_accuracies
 
 
 class GeneralCombiner(ABC):
-    """[summary]
-
-    Args:
-        ABC ([type]): [description]
-
-    Raises:
-        rerr: [description]
-
-    Returns:
-        [type]: [description]
+    """ Abstract class for combining methods.
     """
     
     def __init__(self, c, k, req_val, uncert, device, dtype, name):
@@ -39,18 +30,40 @@ class GeneralCombiner(ABC):
         
     @abstractmethod
     def to_cpu(self):
+        """ Moves parameters of the combining method to the cpu memory.
+        """
         pass
     
     @abstractmethod
     def to_dev(self):
+        """Moves parameters of the combining method to the memory of device specified at the initialization.
+        """
         pass
     
     @abstractmethod
     def fit(self, X, y, val_X=None, val_y=None, verbose=0):
+        """Trains the combining method.
+
+        Args:
+            X (torch.tensor): Predictors.
+            y (torch.tensor): Correct labels.
+            val_X (torch.tensor, optional): Validation predictors. Defaults to None.
+            val_y (torch.tensor, optional): Validation correct labels. Defaults to None.
+            verbose (int, optional): Verbosity level. Defaults to 0.
+        """
         pass
 
     @abstractmethod
     def predict_proba(self, X, coupling_method, l=None, verbose=0, batch_size=None):
+        """Predicts probability based on provided predictors.
+
+        Args:
+            X (torch.tensor): Predictors.
+            coupling_method (str): Coupling method to use.
+            l (int, optional): If specified, performs prediction considering only top l most probable classes from each classifier. Defaults to None.
+            verbose (int, optional): Verbosity level. Defaults to 0.
+            batch_size (int, optional): Batch size for processing. Doesnt affect the output, only memory consumption. Defaults to None.
+        """
         pass
     
     @abstractmethod
@@ -59,13 +72,7 @@ class GeneralCombiner(ABC):
  
 
 class GeneralLinearCombiner(GeneralCombiner):
-    """Abstract class for combining methods.
-
-    Raises:
-        rerr: [description]
-
-    Returns:
-        GeneralCombiner: Combining method.
+    """Abstract class for linear combining methods.
     """
     
     def __init__(self, c, k, req_val=False, fit_pairwise=False, combine_probs=False, uncert=False, device="cpu", dtype=torch.float, name="no_name"):
