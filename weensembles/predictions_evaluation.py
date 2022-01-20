@@ -73,7 +73,7 @@ def compute_nll(pred, tar, penultimate=False):
         ps_thr = thr(pred)
         ps_thr.log_()
 
-    nll = torch.nn.NLLLoss(reduction='sum')
+    nll = torch.nn.NLLLoss(reduction='mean')
     return nll(ps_thr, tar).item()
 
 
