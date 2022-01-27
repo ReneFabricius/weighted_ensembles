@@ -245,7 +245,7 @@ def sbt(PP, verbose=0):
     if verbose > 2:
         print("Solving linear system\n{}\n× x =\n{}".format(P.cpu().numpy(), B.cpu().numpy()))
 
-    X = torch.linalg.solve(P, B)
+    X = torch.linalg.lstsq(P, B).solution
     
     end = timer()
     if verbose > 2:
