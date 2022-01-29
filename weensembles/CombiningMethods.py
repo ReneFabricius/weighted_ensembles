@@ -521,10 +521,10 @@ def _grad_comb(X, y, combiner, coupling_method, verbose=0, epochs=10, lr=0.3, mo
 class lda(GeneralLinearCombiner):
     """Combining method which uses Linear DIscriminant Analysis to infer combining coefficients.
     """
-    def __init__(self, c, k, uncert, name, device="cpu", dtype=torch.float):
-        super().__init__(c=c, k=k, uncert=uncert, req_val=False, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype, name=name)
+    def __init__(self, c, k, uncert, name, req_val, device="cpu", dtype=torch.float):
+        super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype, name=name)
         
-    def train(self, X, y, val_X=None, val_y=None, verbose=0):
+    def train(self, X, y, val_X, val_y, verbose=0):
         """Trains lda model for a pair of classes and outputs its coefficients.
 
         Args:
@@ -540,7 +540,7 @@ class lda(GeneralLinearCombiner):
             torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
         """
         clf = LinearDiscriminantAnalysis(solver='lsqr')
-        clf.fit(X.cpu(), y.cpu())
+        clf.fit(val_X.cpu(), val_y.cpu())
         coefs = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
                            torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
         
@@ -555,7 +555,7 @@ class logreg(GeneralLinearCombiner):
         self.fit_interc_ = fit_interc
         self.sweep_C_ = sweep_C
         
-    def train(self, X, y, val_X=None, val_y=None, verbose=0):
+    def train(self, X, y, val_X, val_y, verbose=0):
         """Trains logistic regression model for a pair of classes and outputs its coefficients.
 
         Args:
@@ -571,10 +571,10 @@ class logreg(GeneralLinearCombiner):
             torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
         """
         if self.sweep_C_:
-            coefs = _logreg_sweep_C(X, y, val_X=val_X, val_y=val_y, fit_intercept=self.fit_interc_, verbose=verbose, device=self.dev_, dtype=self.dtp_)
+            coefs = _logreg_sweep_C(val_X, val_y, val_X=X, val_y=y, fit_intercept=self.fit_interc_, verbose=verbose, device=self.dev_, dtype=self.dtp_)
         else:
             clf = LogisticRegression(fit_intercept=self.fit_interc_)
-            clf.fit(X.cpu(), y.cpu())
+            clf.fit(val_X.cpu(), val_y.cpu())
             coefs = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
                             torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
             
@@ -816,9 +816,9 @@ class neural(GeneralCombiner):
         return torch.sum(preds == y).item() / len(y)
        
        
-comb_methods = {"lda": [lda, {}],
-                "logreg": [logreg, {"fit_interc": True, "sweep_C": False, "req_val": False}],
-                "logreg_no_interc": [logreg, {"fit_interc": False, "sweep_C": False, "req_val": False}],
+comb_methods = {"lda": [lda, {"req_val": True}],
+                "logreg": [logreg, {"fit_interc": True, "sweep_C": False, "req_val": True}],
+                "logreg_no_interc": [logreg, {"fit_interc": False, "sweep_C": False, "req_val": True}],
                 "logreg_sweep_C": [logreg, {"fit_interc": True, "sweep_C": True, "req_val": True}],
                 "logreg_no_interc_sweep_C": [logreg, {"fit_interc": False, "sweep_C": True, "req_val": True}],
                 "average": [average, {"calibrate": False, "combine_probs": False, "req_val": False}],
