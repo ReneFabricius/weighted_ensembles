@@ -131,3 +131,27 @@ class WeightedLinearEnsemble:
 
         df = pd.concat(Ls, ignore_index=True)
         df.to_csv(file, index=False)
+
+    @torch.no_grad()
+    def save_C_coefs(self, file):
+        """Method usable for logreg configurations with sweep_C option and save_C parameter during fit.
+        Saves best found regularization coefficients C into a specified file.
+
+        Args:
+            file (_type_): Path to the file to save coefficients to.
+        """
+        if not hasattr(self.comb_model_, "best_C_"):
+            print("Warning: combining method {} does not have best_C_ attribute".format(self.comb_model_.__name__))
+            return
+        
+        Ls = [None] * ((self.k_ * (self.k_ - 1)) // 2)
+        li = 0
+        cols = ["i", "j", "C"]
+        for i in range(self.k_):
+            for j in range(i + 1, self.k_):
+                cfs = [[i, j, self.comb_model_.best_C_[i, j].item()]]
+                Ls[li] = pd.DataFrame(cfs, columns=cols)
+                li += 1
+
+        df = pd.concat(Ls, ignore_index=True)
+        df.to_csv(file, index=False)

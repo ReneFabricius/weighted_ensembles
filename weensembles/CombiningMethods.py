@@ -1,5 +1,6 @@
 import re
 from textwrap import fill
+from attr import has
 import torch
 from timeit import default_timer as timer
 from sklearn.linear_model import LogisticRegression
@@ -41,7 +42,7 @@ class GeneralCombiner(ABC):
         pass
     
     @abstractmethod
-    def fit(self, X, y, val_X=None, val_y=None, verbose=0):
+    def fit(self, X, y, val_X=None, val_y=None, verbose=0, **kwargs):
         """Trains the combining method.
 
         Args:
@@ -96,7 +97,7 @@ class GeneralLinearCombiner(GeneralCombiner):
             for cal_m in self.cal_models_:
                 cal_m.to_dev()
         
-    def fit(self, X, y, val_X=None, val_y=None, verbose=0):
+    def fit(self, X, y, val_X=None, val_y=None, verbose=0, **kwargs):
         """
         Trains combining method on logits of several classifiers.
         
@@ -123,6 +124,8 @@ class GeneralLinearCombiner(GeneralCombiner):
 
         if self.fit_pairwise_:
             self.coefs_ = torch.zeros(self.k_, self.k_, self.c_ + 1, device=self.dev_, dtype=self.dtp_)
+            if hasattr(self, "sweep_C_") and "save_C" in kwargs and kwargs["save_C"]:
+                self.best_C_ = torch.ones(self.k_, self.k_, device=self.dev_, dtype=self.dtp_)
             pi = 0
             for fc in range(self.k_):
                 for sc in range(fc + 1, self.k_):
@@ -163,6 +166,12 @@ class GeneralLinearCombiner(GeneralCombiner):
                         pw_coefs = self.train(X=pw_X, y=pw_y, val_X=pw_X_val, val_y=pw_y_val, verbose=verbose)
                     else:
                         pw_coefs = self.train(X=pw_X, y=pw_y, verbose=verbose)
+                        
+                    if hasattr(self, "sweep_C_"):
+                        pw_coefs, best_C = pw_coefs
+                        if "save_C" in kwargs and kwargs["save_C"]:
+                            self.best_C_[fc, sc] = best_C
+                            self.best_C_[sc, fc] = best_C
                         
                     self.coefs_[fc, sc, :] = pw_coefs
                     self.coefs_[sc, fc, :] = pw_coefs
@@ -345,9 +354,9 @@ def _logreg_sweep_C(X, y, val_X, val_y, fit_intercept=False, verbose=0, device="
     """
     if verbose > 1:
         print("Searching for best C value")
-    E_start = -1
-    E_end = 1
-    E_count = 11
+    E_start = -3
+    E_end = 3
+    E_count = 31
     C_vals = 10**np.linspace(start=E_start, stop=E_end,
                         num=E_count, endpoint=True)
     
@@ -373,7 +382,7 @@ def _logreg_sweep_C(X, y, val_X, val_y, fit_intercept=False, verbose=0, device="
     coefs = torch.cat((torch.tensor(best_model.coef_, device=device, dtype=dtype).squeeze(),
                        torch.tensor(best_model.intercept_, device=device, dtype=dtype)))
 
-    return coefs 
+    return coefs, best_C
 
 
 def _averaging_coefs(X, y, val_X=None, val_y=None, calibrate=False, comb_probs=False, device="cpu", dtype=torch.float, verbose=0):
@@ -571,14 +580,16 @@ class logreg(GeneralLinearCombiner):
             torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
         """
         if self.sweep_C_:
-            coefs = _logreg_sweep_C(val_X, val_y, val_X=X, val_y=y, fit_intercept=self.fit_interc_, verbose=verbose, device=self.dev_, dtype=self.dtp_)
+            coefs, best_C = _logreg_sweep_C(val_X, val_y, val_X=X, val_y=y, fit_intercept=self.fit_interc_, verbose=verbose, device=self.dev_, dtype=self.dtp_)
         else:
             clf = LogisticRegression(fit_intercept=self.fit_interc_)
             clf.fit(val_X.cpu(), val_y.cpu())
             coefs = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
                             torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
-            
-        return coefs
+        if self.sweep_C_:
+            return coefs, best_C
+        
+        return coefs 
 
 
 class average(GeneralLinearCombiner):
@@ -686,7 +697,7 @@ class neural(GeneralCombiner):
         """
         self.net_ = self.net_.to(device=self.dev_)
     
-    def fit(self, val_X, val_y, batch_size=500, lr=0.01, momentum=0, epochs=10, verbose=0, test_period=None, X=None, y=None):
+    def fit(self, val_X, val_y, batch_size=500, lr=0.01, momentum=0, epochs=10, verbose=0, test_period=None, X=None, y=None, **kwargs):
         """Trains neural network used for inferring R matrix using end-to-end training using provided coupling method and validation data.
 
         Args:
