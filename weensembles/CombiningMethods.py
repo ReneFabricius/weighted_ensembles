@@ -167,7 +167,7 @@ class GeneralLinearCombiner(GeneralCombiner):
                     else:
                         pw_coefs = self.train(X=pw_X, y=pw_y, verbose=verbose)
                         
-                    if hasattr(self, "sweep_C_"):
+                    if hasattr(self, "sweep_C_") and self.sweep_C_:
                         pw_coefs, best_C = pw_coefs
                         if "save_C" in kwargs and kwargs["save_C"]:
                             self.best_C_[fc, sc] = best_C
@@ -559,10 +559,11 @@ class lda(GeneralLinearCombiner):
 class logreg(GeneralLinearCombiner):
     """Combining method which uses Logistic Regression to infer combining coefficients.
     """
-    def __init__(self, c, k, fit_interc, sweep_C, name, req_val, uncert, device="cpu", dtype=torch.float):
+    def __init__(self, c, k, fit_interc, sweep_C, name, req_val, uncert, device="cpu", dtype=torch.float, base_C=1.0):
         super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype, name=name)
         self.fit_interc_ = fit_interc
         self.sweep_C_ = sweep_C
+        self.base_C_ = base_C
         
     def train(self, X, y, val_X, val_y, verbose=0):
         """Trains logistic regression model for a pair of classes and outputs its coefficients.
@@ -580,9 +581,10 @@ class logreg(GeneralLinearCombiner):
             torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
         """
         if self.sweep_C_:
-            coefs, best_C = _logreg_sweep_C(val_X, val_y, val_X=X, val_y=y, fit_intercept=self.fit_interc_, verbose=verbose, device=self.dev_, dtype=self.dtp_)
+            coefs, best_C = _logreg_sweep_C(val_X, val_y, val_X=X, val_y=y, fit_intercept=self.fit_interc_, verbose=verbose,
+                                            device=self.dev_, dtype=self.dtp_)
         else:
-            clf = LogisticRegression(fit_intercept=self.fit_interc_)
+            clf = LogisticRegression(fit_intercept=self.fit_interc_, C=self.base_C_)
             clf.fit(val_X.cpu(), val_y.cpu())
             coefs = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
                             torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
@@ -845,10 +847,28 @@ comb_methods = {"lda": [lda, {"req_val": True}],
                 }
 
 
+def arguments_dict(dict_str):
+    res = {}
+    for arg in dict_str.split(","):
+        name, value = arg.split(":")
+        try:
+            value = float(value)
+        except ValueError:
+            print("Warning: unsupported argument type in argument-value pair {}".format(arg))
+            continue
+        
+        res[name] = value
+    
+    return res
+
+
 def comb_picker(co_m, c, k, device="cpu", dtype=torch.float):
-    co_split = co_m.split('.')
+    m = re.match(r"^(?P<co>.+?)(\{(?P<args>.*)\})?$", co_m)
+    co_m_name = m.group("co")
+    args_dict = arguments_dict(m.group("args"))
+    co_split = co_m_name.split('.')
     co_name = co_split[0]
     if co_name not in comb_methods:
         return None
     
-    return comb_methods[co_name][0](c=c, k=k, device=device, dtype=dtype, name=co_m, uncert=co_split[-1] == "uncert", **comb_methods[co_name][1])
+    return comb_methods[co_name][0](c=c, k=k, device=device, dtype=dtype, name=co_m, uncert=co_split[-1] == "uncert", **comb_methods[co_name][1], **args_dict)
