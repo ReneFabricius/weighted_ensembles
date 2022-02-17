@@ -863,6 +863,20 @@ def arguments_dict(dict_str):
 
 
 def comb_picker(co_m, c, k, device="cpu", dtype=torch.float):
+    """Finds and returns combining method with specified parameters.
+    Special parameters can be appended to co_m in a curly braces in a dictionary style.
+    Example: logreg_no_interc.uncert{base_C:0.2} sends argument base_C=0.2 to corresponding function from comb_methods dictionary.
+
+    Args:
+        co_m (str): Name of combining method. May include specific arguments.
+        c (int): Number of classifiers to combine.
+        k (int): Number of classes.
+        device (str, optional): Device on which to perform the combining method. Defaults to "cpu".
+        dtype (str, optional): Datatype of inputs and outputs. Defaults to torch.float.
+
+    Returns:
+        GeneralCombiner: Object representing combining method.
+    """
     m = re.match(r"^(?P<co>.+?)(\{(?P<args>.*)\})?$", co_m)
     co_m_name = m.group("co")
     args_dict = arguments_dict(m.group("args"))
