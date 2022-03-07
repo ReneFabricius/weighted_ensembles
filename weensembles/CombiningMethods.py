@@ -866,6 +866,9 @@ comb_methods = {"lda": [lda, {"req_val": True}],
 
 def arguments_dict(dict_str):
     res = {}
+    if dict_str is None:
+        return res
+    
     for arg in dict_str.split(","):
         name, value = arg.split(":")
         try:
