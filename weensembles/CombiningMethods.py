@@ -298,7 +298,7 @@ class GeneralLinearCombiner(GeneralCombiner):
                     pc_coefs = coefs.unsqueeze(0).expand(pcn, k, k, c + 1)[pc_coef_M, :].reshape(pcn, pc, pc, c + 1)
                     
                 triu_inds = tuple(torch.triu_indices(row=pc, col=pc, offset=1, device=self.dev_))
-                pc_coefs.transpose(0, 1).index_put_(indices=triu_inds, values=torch.tensor([0], dtype=self.dtp_, device=self.dev_))
+                pc_coefs = pc_coefs.transpose(0, 1).index_put(indices=triu_inds, values=torch.tensor([0], dtype=self.dtp_, device=self.dev_))
                 pc_coefs = pc_coefs + pc_coefs.transpose(0, 1)
                 
                 Ws = pc_coefs[:, :, :, 0:-1]
