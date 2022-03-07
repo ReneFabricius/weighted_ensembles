@@ -443,7 +443,7 @@ def _averaging_coefs(X, y, val_X=None, val_y=None, calibrate=False, comb_probs=F
     return coefs.expand(k, k, -1)
 
 
-def _grad_comb(X, y, combiner, coupling_method, verbose=0, epochs=10, lr=0.3, momentum=0.85, test_period=None, batch_sz=500):
+def _grad_comb(X, y, combiner, coupling_method, verbose=0, epochs=10, lr=0.3, momentum=0.85, test_period=None, batch_sz=500, C=1.0):
     """Trains combining coefficients in end-to-end manner by gradient descent method.
 
     Args:
@@ -515,6 +515,8 @@ def _grad_comb(X, y, combiner, coupling_method, verbose=0, epochs=10, lr=0.3, mo
                         pred = thresh(combiner.predict_proba(X=X_mb, l=k, coupling_method=coupling_method,
                                                              verbose=max(verbose - 2, 0), batch_size=mbatch_sz, coefs=coefs))
                         loss = nll_loss(torch.log(pred), y_mb) * (len(y_mb) / len(y_batch))
+                        L2 = torch.sum(torch.pow(coefs[:,:,:-1], 2)) / (k * (k - 1) * c)
+                        loss = loss + L2 / C
                         if verbose > 1:
                             print("Loss: {}".format(loss))
                         loss.backward()
@@ -641,9 +643,10 @@ class average(GeneralLinearCombiner):
 class grad(GeneralLinearCombiner):
     """Combining method which trains its coefficient in an end-to-end manner using gradient descent.
     """
-    def __init__(self, c, k, coupling_method, uncert, name, device="cpu", dtype=torch.float):
+    def __init__(self, c, k, coupling_method, uncert, name, device="cpu", dtype=torch.float, base_C=1.0):
         super().__init__(c=c, k=k, uncert=uncert, req_val=True, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype, name=name)
         self.coupling_m_ = coupling_method
+        self.base_C_ = base_C
         
     def train(self, X, y, val_X, val_y, verbose=0):
         """Computes and outputs coefficients.
@@ -660,7 +663,7 @@ class grad(GeneralLinearCombiner):
         Returns:
             torch.tensor: Computed coefficients. Tensor of shape k × k × (c + 1), where k is number of classes and c in number of combined classifiers.
         """
-        return _grad_comb(X=val_X, y=val_y, combiner=self, coupling_method=self.coupling_m_, verbose=verbose)
+        return _grad_comb(X=val_X, y=val_y, combiner=self, coupling_method=self.coupling_m_, verbose=verbose, C=self.base_C_)
 
 
 class Net(torch.nn.Module):
