@@ -292,14 +292,16 @@ class GeneralLinearCombiner(GeneralCombiner):
                 
                                 
                 pc_coef_M = pcM.unsqueeze(2).expand(pcn, k, k) * pcM.unsqueeze(1).expand(pcn, k, k)
-                if coefs is None:
-                    pc_coefs = self.coefs_.unsqueeze(0).expand(pcn, k, k, c + 1)[pc_coef_M, :].reshape(pcn, pc, pc, c + 1)
-                else:
-                    pc_coefs = coefs.unsqueeze(0).expand(pcn, k, k, c + 1)[pc_coef_M, :].reshape(pcn, pc, pc, c + 1)
-                    
+                
                 triu_inds = tuple(torch.triu_indices(row=pc, col=pc, offset=1, device=self.dev_))
-                pc_coefs = pc_coefs.transpose(0, 1).index_put(indices=triu_inds, values=torch.tensor([0], dtype=self.dtp_, device=self.dev_))
-                pc_coefs = pc_coefs + pc_coefs.transpose(0, 1)
+                if coefs is None:
+                    coefs_sym = self.coefs_.transpose(0, 1).index_put(indices=triu_inds, values=torch.tensor([0], dtype=self.dtp_, device=self.dev_))
+                else:
+                    coefs_sym = coefs.transpose(0, 1).index_put(indices=triu_inds, values=torch.tensor([0], dtype=self.dtp_, device=self.dev_))
+                    
+                coefs_sym = coefs_sym + coefs_sym.transpose(0, 1)
+                
+                pc_coefs = coefs_sym.unsqueeze(0).expand(pcn, k, k, c + 1)[pc_coef_M, :].reshape(pcn, pc, pc, c + 1)
                 
                 Ws = pc_coefs[:, :, :, 0:-1]
                 Bs = pc_coefs[:, :, :, -1]
