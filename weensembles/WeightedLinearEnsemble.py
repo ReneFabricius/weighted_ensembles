@@ -109,9 +109,12 @@ class WeightedLinearEnsemble:
         with open(file, 'rb') as f:
             dump_dict = pickle.load(f)
 
+        keep_dev = self.dev_
         self.__dict__.update(dump_dict)
+        self.dev_ = keep_dev
         if self.comb_model_ is not None:
-                self.comb_model_.to_dev()
+            self.comb_model_.set_dev(self.dev_)
+            self.comb_model_.to_dev()
 
     @torch.no_grad()
     def save_coefs_csv(self, file):

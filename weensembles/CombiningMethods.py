@@ -42,6 +42,11 @@ class GeneralCombiner(ABC):
         pass
     
     @abstractmethod
+    def set_dev(self, device):
+        """Sets device for the combining method.
+        """
+    
+    @abstractmethod
     def fit(self, X, y, val_X=None, val_y=None, verbose=0, **kwargs):
         """Trains the combining method.
 
@@ -96,7 +101,13 @@ class GeneralLinearCombiner(GeneralCombiner):
         if self.cal_models_ is not None:
             for cal_m in self.cal_models_:
                 cal_m.to_dev()
-        
+                
+    def set_dev(self, device):
+        self.dev_ = device
+        if self.cal_models_ is not None:
+            for cal_m in self.cal_models_:
+                cal_m.set_dev(device)
+
     def fit(self, X, y, val_X=None, val_y=None, verbose=0, **kwargs):
         """
         Trains combining method on logits of several classifiers.
@@ -158,7 +169,7 @@ class GeneralLinearCombiner(GeneralCombiner):
                     if self.req_val_:
                         pw_y_val = val_y[SamM_val]
                         mask_fc_val = (pw_y_val == fc)
-                        mask_sc_val = (pw_y_val == sc)
+                        mask_sc_val = (pw_y_val == sc)()
                         pw_y_val[mask_fc_val] = 1
                         pw_y_val[mask_sc_val] = 0
 
@@ -205,12 +216,14 @@ class GeneralLinearCombiner(GeneralCombiner):
     def predict_proba(self, X, coupling_method, l=None, verbose=0, batch_size=None, coefs=None, combine_probs=None):
         """
         Combines outputs of constituent classifiers using only those classes, which are among the top l most probable
-        for some constituent classifier.
-        :param MP: MP: c x n x k tensor of constituent classifiers posteriors
+        for some constituent classifier. All coefficients are used, both for classes i, j and j, i.
+        :param MP: c x n x k tensor of constituent classifiers posteriors
         c - number of constituent classifiers, n - number of training samples, k - number of classes
         :param l: how many most probable classes for each constituent classifier to consider
         :param coupling_method: coupling method to use
         :param batch_size: if not none, the size of the batches to use
+        :param coefs: k x k x c + 1 tensor of coefficients used for prediction instead of model coefficients.
+        Coefficients are taken as is, they are not necesarilly symmetric.
         :return: n x k tensor of combined posteriors
         """
         if verbose > 0:
@@ -434,8 +447,8 @@ def _grad_comb(X, y, combiner, coupling_method, verbose=0, epochs=10, lr=0.3, mo
         coupling_method (str): Name of coupling method to be used for training.
         verbose (int, optional): Level of verbosity. Defaults to 0.
         epochs (int, optional): Number of epochs. Defaults to 10.
-        lr (float, optional): Learning rate. Defaults to 0.01.
-        momentum (float, optional): Momentum. Defaults to 0.9.
+        lr (float, optional): Learning rate. Defaults to 0.3.
+        momentum (float, optional): Momentum. Defaults to 0.85.
         test_period (int, optional): If not None, period in which testing pass is performed. Defaults to None.
         batch_sz (int, optional): Batch size. Defaults to 500.
 

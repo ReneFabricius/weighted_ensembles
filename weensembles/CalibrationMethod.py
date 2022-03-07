@@ -52,6 +52,14 @@ class CalibrationMethod(ABC):
         """
         pass
 
+    @abc.abstractmethod
+    def set_dev(self, device):
+        """Sets device for the model.
+
+        Args:
+            device (string): device
+        """
+
 
 class TemperatureScaling(CalibrationMethod):
     """
@@ -157,3 +165,7 @@ class TemperatureScaling(CalibrationMethod):
     @torch.no_grad()
     def to_dev(self):
         self.temp_ = self.temp_.to(self.dev_)
+        
+    @torch.no_grad()
+    def set_dev(self, device):
+        self.dev_ = device
