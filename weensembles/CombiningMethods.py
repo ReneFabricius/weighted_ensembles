@@ -213,7 +213,7 @@ class GeneralLinearCombiner(GeneralCombiner):
     def train(self, X, y, val_X=None, val_y=None, verbose=0):
         pass
     
-    def predict_proba(self, X, coupling_method, l=None, verbose=0, batch_size=None, coefs=None, combine_probs=None):
+    def predict_proba(self, X, coupling_method, l=None, verbose=0, batch_size=None, coefs=None, combine_probs=None, return_lin_comb=False):
         """
         Combines outputs of constituent classifiers using only those classes, which are among the top l most probable
         for some constituent classifier. All coefficients are used, both for classes i, j and j, i.
@@ -229,7 +229,7 @@ class GeneralLinearCombiner(GeneralCombiner):
         if verbose > 0:
             print("Starting predict proba of {}".format(self.name_))
         coup_m = coup_picker(coupling_method)
-        if coup_m is None:
+        if coup_m is None and not return_lin_comb:
             print("Unknown coupling method {} selected".format(coupling_method))
             return 1
  
@@ -245,6 +245,7 @@ class GeneralLinearCombiner(GeneralCombiner):
             l = self.k_
         b_size = batch_size if batch_size is not None else n
         ps_list = []
+        lin_comb_list = []
 
         for start_ind in range(0, n, b_size):
             curMP = X[:, start_ind:(start_ind + b_size), :].to(device=self.dev_, dtype=self.dtp_)
@@ -311,8 +312,13 @@ class GeneralLinearCombiner(GeneralCombiner):
                     pw_probs = expit(pw_w_supports)
                     pcR = torch.mean(pw_probs, dim=-1)
                 else:
+                    if return_lin_comb:
+                        lin_comb_list.append((torch.sum(pw_w_supports, dim=-1) + Bs).unsqueeze(0))
+                        continue
+
                     pcR = expit(torch.sum(pw_w_supports, dim=-1) + Bs)
-                 
+                    
+                                 
                 if self.uncert_:
                     pcMPprob = curMPprob[:, samplM]
                     picked_probs = pcMPprob[:, pcM].reshape(c, pcn, pc).transpose(0, 1).transpose(1, 2)
@@ -332,6 +338,10 @@ class GeneralLinearCombiner(GeneralCombiner):
             
             ps_list.append(ps)
 
+        if return_lin_comb:
+            lin_comb_full = torch.cat(lin_comb_list, dim=0)
+            return lin_comb_full
+        
         ps_full = torch.cat(ps_list, dim=0)
         end = timer()
         if verbose > 0:
@@ -548,6 +558,75 @@ def _grad_comb(X, y, combiner, coupling_method, verbose=0, epochs=10, lr=0.3, mo
     return coefs
  
 
+def _logreg_torch(X, y, verbose=0, epochs=10, lr=0.3, momentum=0.85, test_period=None, batch_sz=500, C=1.0):
+    if verbose > 0:
+        print("Starting logreg_torch fit")
+    c, n, k = X.shape
+    nk = n // k
+    dev = X.device
+    
+    coefs = torch.full(size=(k, k, c + 1), fill_value=1.0 / c, device=X.device, dtype=X.dtype)
+    coefs[:, :, c] = 0
+    coefs.requires_grad_(True)
+    X.requires_grad_(False)
+    y.requires_grad_(False)
+    bce_loss = torch.nn.BCEWithLogitsLoss()
+    opt = torch.optim.LBFGS(params=(coefs,), lr=lr, max_iter=100)
+
+    tinds = torch.triu_indices(row=k, col=k, offset=1)
+    uppr_mask = torch.zeros(k, k, dtype=torch.bool, device=dev)
+    uppr_mask.index_put_(indices=(tinds[0], tinds[1]), values=torch.tensor([True], dtype=torch.bool, device=dev))
+    uppr_mask = uppr_mask.unsqueeze(0).expand(2 * nk, k, k)
+    
+    X = torch.permute(X.unsqueeze(3).expand(c, n, k, k), (2, 3, 0, 1))
+    y = y.unsqueeze(1).unsqueeze(2).expand(n, k, k)
+    cl = torch.tensor(range(k), device=dev).unsqueeze(1).expand(k, k)
+    diag = torch.eye(k, k, device=dev) != 1
+    src_mask = ((y == cl) + (y == cl.t())) * diag
+    dest_mask = diag.unsqueeze(0).expand(2 * nk, k, k).transpose_(0, 1).transpose_(1, 2)
+    src_mask = src_mask.transpose(0, 1).transpose(1, 2)
+    
+    tars_src = torch.zeros(n, k, k, device=dev)
+    tars_src[(y == cl) * diag] = 1.0
+    tars_src.transpose_(0, 1).transpose_(1, 2)
+    tars_dest = torch.zeros(k, k, 2 * nk, device=dev)
+    tars_dest[dest_mask] = tars_src[src_mask]
+    tars_dest.transpose_(2, 1).transpose_(1, 0)
+
+    dest = torch.zeros(k, k, c, 2 * nk, device=dev, dtype=X.dtype)
+    src_mask = src_mask.unsqueeze(2).expand(k, k, c, n)
+    dest_mask = dest_mask.unsqueeze(2).expand(k, k, c, 2 * nk)
+    dest[dest_mask] = X[src_mask] - X.transpose(0, 1)[src_mask]
+    dest.transpose_(3, 2).transpose_(2, 1).transpose_(1, 0)
+
+    for e in range(epochs):
+        if verbose > 1:
+            print("Processing epoch {}".format(e))
+        opt.zero_grad()
+                    
+        def closure():
+            Ws = coefs[:, :, 0:-1]
+            Bs = coefs[:, :, -1]
+        
+            preds = torch.sum(Ws * dest, dim=-1) + Bs
+
+            loss = bce_loss(preds[uppr_mask], tars_dest[uppr_mask])
+            L2 = torch.sum(torch.pow(coefs[:,:,:-1], 2)) / (k * (k - 1) * c)
+            loss = loss + L2 / C
+            return loss
+        
+        loss = closure()
+        
+        if verbose > 1:
+            print("Loss: {}".format(loss))
+        loss.backward()
+        
+        opt.step(closure)
+    
+    coefs.requires_grad_(False)
+    return coefs
+
+
 class lda(GeneralLinearCombiner):
     """Combining method which uses Linear DIscriminant Analysis to infer combining coefficients.
     """
@@ -612,7 +691,33 @@ class logreg(GeneralLinearCombiner):
         if self.sweep_C_:
             return coefs, best_C
         
-        return coefs 
+        return coefs
+    
+
+class logreg_torch(GeneralLinearCombiner):
+    def __init__(self, c, k, fit_interc, name, req_val, uncert, device="cpu", dtype=torch.float, base_C=1.0, epochs=1):
+        super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype, name=name)
+        self.fit_interc_ = fit_interc
+        self.epochs_ = int(epochs)
+        self.base_C_ = base_C
+        
+    def train(self, X, y, val_X, val_y, verbose=0):
+        """Trains logistic regression model for a pair of classes and outputs its coefficients.
+
+        Args:
+            X (torch.tensor): Tensor of training predictors. Shape n × c, where n is number of training samples and c is number of combined classifiers.
+            y (torch.tensor): Tensor of training labels. Shape n - number of training samples.
+            val_X (torch.tensor, optional): Tensor of validation predictors. Shape n × c, 
+            where n is number of validation samples and c is number of combined classifiers. Defaults to None.
+            val_y ([torch.tensor, optional): Tensor of validation labels. SHape n - number of validation samples. Defaults to None.
+            wle (WeightedLinearEnsemble, optional): WeightedLinearEnsemble for which the coefficients are trained. Defaults to None.
+            verbose (int, optional): Verbosity level. Defaults to 0.
+
+        Returns:
+            torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
+        """
+        return _logreg_torch(X=val_X, y=val_y, verbose=verbose, epochs=self.epochs_, C=self.base_C_)
+
 
 
 class average(GeneralLinearCombiner):
@@ -865,7 +970,8 @@ comb_methods = {"lda": [lda, {"req_val": True}],
                 "grad_bc": [grad, {"coupling_method": "bc"}],
                 "neural_m1": [neural, {"coupling_method": "m1"}],
                 "neural_m2": [neural, {"coupling_method": "m2"}],
-                "neural_bc": [neural, {"coupling_method": "bc"}]
+                "neural_bc": [neural, {"coupling_method": "bc"}],
+                "logreg_torch": [logreg_torch, {"fit_interc": True, "req_val": True}]
                 }
 
 
