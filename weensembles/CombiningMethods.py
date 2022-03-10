@@ -169,7 +169,7 @@ class GeneralLinearCombiner(GeneralCombiner):
                     if self.req_val_:
                         pw_y_val = val_y[SamM_val]
                         mask_fc_val = (pw_y_val == fc)
-                        mask_sc_val = (pw_y_val == sc)()
+                        mask_sc_val = (pw_y_val == sc)
                         pw_y_val[mask_fc_val] = 1
                         pw_y_val[mask_sc_val] = 0
 
