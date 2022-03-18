@@ -556,72 +556,125 @@ def _grad_comb(X, y, combiner, coupling_method, verbose=0, epochs=10, lr=0.3, mo
 
     coefs.requires_grad_(False)
     return coefs
- 
 
-def _logreg_torch(X, y, verbose=0, epochs=10, lr=0.3, momentum=0.85, test_period=None, batch_sz=500, C=1.0):
-    if verbose > 0:
-        print("Starting logreg_torch fit")
+def _transform_for_pairwise_fit(X, y):
+    """
+    Transforms data into format for feeding into pairwise models. Each class must have the same number of samples.
+    Resulting features are organized in a class by class manner, this is represented by dimensions k x k.
+    Data at position k1, k2 belong either to the class k1 or k2. This can be determined from the tensor of transformed labels where data which belong
+    to the class k1 have label 1 and data which belong to the class k2 have label 0.
+
+    Args:
+        X (torch.tensor): Input features. Shape c x n x k
+        y (torch.tensor): Input labels. Shape n.
+
+    Returns:
+        torch.tensor, torch.tensor, torch.tensor: Returns three tensors.
+        First is tensor of transformed features. This has shape 2*nk x k x k x c, where nk is number of samples per class.
+        Second is tensor of thansformed labels. This has shape 2*nk x k x k.
+        Third is tensor containing upper triangle mask uf the shape k x k.
+    """
     c, n, k = X.shape
     nk = n // k
     dev = X.device
+    dtp = X.dtype
     
-    coefs = torch.full(size=(k, k, c + 1), fill_value=1.0 / c, device=X.device, dtype=X.dtype)
-    coefs[:, :, c] = 0
-    coefs.requires_grad_(True)
-    X.requires_grad_(False)
-    y.requires_grad_(False)
-    bce_loss = torch.nn.BCEWithLogitsLoss()
-    opt = torch.optim.LBFGS(params=(coefs,), lr=lr, max_iter=100)
-
+    # Create boolean mask with upper triangle indices True
     tinds = torch.triu_indices(row=k, col=k, offset=1)
     uppr_mask = torch.zeros(k, k, dtype=torch.bool, device=dev)
     uppr_mask.index_put_(indices=(tinds[0], tinds[1]), values=torch.tensor([True], dtype=torch.bool, device=dev))
-    uppr_mask = uppr_mask.unsqueeze(0).expand(2 * nk, k, k)
     
-    X = torch.permute(X.unsqueeze(3).expand(c, n, k, k), (2, 3, 0, 1))
     y = y.unsqueeze(1).unsqueeze(2).expand(n, k, k)
     cl = torch.tensor(range(k), device=dev).unsqueeze(1).expand(k, k)
-    diag = torch.eye(k, k, device=dev) != 1
-    src_mask = ((y == cl) + (y == cl.t())) * diag
-    dest_mask = diag.unsqueeze(0).expand(2 * nk, k, k).transpose_(0, 1).transpose_(1, 2)
-    src_mask = src_mask.transpose(0, 1).transpose(1, 2)
-    
-    tars_src = torch.zeros(n, k, k, device=dev)
-    tars_src[(y == cl) * diag] = 1.0
-    tars_src.transpose_(0, 1).transpose_(1, 2)
-    tars_dest = torch.zeros(k, k, 2 * nk, device=dev)
-    tars_dest[dest_mask] = tars_src[src_mask]
-    tars_dest.transpose_(2, 1).transpose_(1, 0)
+    non_diag = torch.eye(k, k, device=dev) != 1
+    # src_mask has shape n x k x k. src_mask[i, k1, k2] contains True if sample i belongs to class k1 or k2.
+    src_mask = ((y == cl) + (y == cl.t())) * non_diag
+    # Lower indices move slower in the masked select. Permute src_mask dimensions, so the picked elements are ordered by first and second class.
+    src_mask = torch.permute(src_mask, (1, 2, 0))
 
-    dest = torch.zeros(k, k, c, 2 * nk, device=dev, dtype=X.dtype)
+    dest_mask = torch.permute(non_diag.unsqueeze(0).expand(2 * nk, k, k), (1, 2, 0))
+    # dest_mask contains true everywhere except on the main diagonal of a k x k matrix.    
+        
+    tars_src = torch.zeros(n, k, k, device=dev)
+    # Class given by row index has label 1. 
+    tars_src[(y == cl) * non_diag] = 1.0
+    # Permute dimensions, so the masked select is ordered first by class dimensions.
+    tars_src = torch.permute(tars_src, (1, 2, 0))
+    y_pw = torch.zeros(k, k, 2 * nk, device=dev)
+    y_pw[dest_mask] = tars_src[src_mask]
+    y_pw = torch.permute(y_pw, (2, 0, 1))
+
+    # Expand by second class index
+    X = torch.permute(X.unsqueeze(3).expand(c, n, k, k), (2, 3, 0, 1))
+    X_pw = torch.zeros(k, k, c, 2 * nk, device=dev, dtype=dtp)
+    # Expand by feature dimension (c)
     src_mask = src_mask.unsqueeze(2).expand(k, k, c, n)
     dest_mask = dest_mask.unsqueeze(2).expand(k, k, c, 2 * nk)
-    dest[dest_mask] = X[src_mask] - X.transpose(0, 1)[src_mask]
-    dest.transpose_(3, 2).transpose_(2, 1).transpose_(1, 0)
+    # Compute difference: first(row) class logit - second(column) class logit.
+    X_pw[dest_mask] = X[src_mask] - X.transpose(0, 1)[src_mask]
+    X_pw = torch.permute(X_pw, (3, 0, 1, 2))
+    
+    return X_pw, y_pw, uppr_mask
 
-    for e in range(epochs):
-        if verbose > 1:
-            print("Processing epoch {}".format(e))
-        opt.zero_grad()
+
+def _logreg_torch(X, y, fit_intercept=True, verbose=0, max_iter=1000, micro_batch=None, C=1.0):
+    """Trains multiple logistic regression models using parallelism 
+
+    Args:
+        X (torch.tensor): Tensor of training predictors. Shape c × n × k. Where c is number of combined classifiers, n is number of training samples and k is number of classes.
+        y (torch.tensor): Tensor of training labels. Shape n - number of training samples.
+        fit_intercept (bool, optional): Whether to fit intercept. Defaults to True.
+        verbose (int, optional): Verbosity level. Defaults to 0.
+        max_iter (int, optional): Maximum number of iterations of the LBFGS optimizer. Defaults to 1000.
+        micro_batch (_type_, optional): Micro batch size. If None, no micro batching is performed. Defaults to None.
+        C (float, optional): Regularization coefficient. Defaults to 1.0.
+
+    Returns:
+        torch.tensor: fitted coefficients. shape: k x k x c + int(fit_intercept). Only models where k1 < k2 have nonzero coefficients.
+    """
+    if verbose > 0:
+        print("Starting logreg_torch fit")
+    c, n, k = X.shape
+    
+    coefs = torch.zeros(size=(k, k, c + int(fit_intercept)), device=X.device, dtype=X.dtype, requires_grad=True)
+    X.requires_grad_(False)
+    y.requires_grad_(False)
+    # TODO change to mean and modify C
+    bce_loss = torch.nn.BCEWithLogitsLoss(reduction="sum")
+    opt = torch.optim.LBFGS(params=(coefs,), max_iter=max_iter)
+
+    X_pw, y_pw, upper_mask = _transform_for_pairwise_fit(X, y)
+    
+    if micro_batch is None:
+        micro_batch = X_pw.shape[0]
                     
-        def closure():
+    def closure_loss():
+        opt.zero_grad()
+        if fit_intercept:
             Ws = coefs[:, :, 0:-1]
             Bs = coefs[:, :, -1]
         
-            preds = torch.sum(Ws * dest, dim=-1) + Bs
+        loss = torch.tensor([0], device=X_pw.device, dtype=X_pw.dtype) 
+        for mbs in range(0, X_pw.shape[0], micro_batch):
+            cur_X = X_pw[mbs : mbs + micro_batch]
+            cur_y = y_pw[mbs : mbs + micro_batch]
+            if fit_intercept:        
+                lin_comb = torch.sum(Ws * cur_X, dim=-1) + Bs
+            else:
+                lin_comb = torch.sum(coefs * cur_X, dim=-1)
 
-            loss = bce_loss(preds[uppr_mask], tars_dest[uppr_mask])
-            L2 = torch.sum(torch.pow(coefs[:,:,:-1], 2)) / (k * (k - 1) * c)
-            loss = loss + L2 / C
-            return loss
+            loss += bce_loss(torch.permute(lin_comb, (1, 2, 0))[upper_mask], torch.permute(cur_y, (1, 2, 0))[upper_mask])
         
-        loss = closure()
+        if fit_intercept:
+            L2 = torch.sum(torch.pow(coefs[:,:,:-1][upper_mask], 2))
+        else:
+            L2 = torch.sum(torch.pow(coefs[upper_mask], 2))
+        loss += L2 / 2.0 / C
+
+        loss.backward(retain_graph=True)
+        return loss
         
-        if verbose > 1:
-            print("Loss: {}".format(loss))
-        loss.backward()
-        
-        opt.step(closure)
+    opt.step(closure_loss)
     
     coefs.requires_grad_(False)
     return coefs
@@ -695,10 +748,12 @@ class logreg(GeneralLinearCombiner):
     
 
 class logreg_torch(GeneralLinearCombiner):
-    def __init__(self, c, k, fit_interc, name, req_val, uncert, device="cpu", dtype=torch.float, base_C=1.0, epochs=1):
+    """Combining method which uses logistic regression implemented in pytorch to infer combining coefficients.
+    """
+    def __init__(self, c, k, fit_interc, name, req_val, uncert, device="cpu", dtype=torch.float, base_C=1.0, max_iter=1000):
         super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype, name=name)
         self.fit_interc_ = fit_interc
-        self.epochs_ = int(epochs)
+        self.max_iter_ = int(max_iter)
         self.base_C_ = base_C
         
     def train(self, X, y, val_X, val_y, verbose=0):
@@ -716,7 +771,7 @@ class logreg_torch(GeneralLinearCombiner):
         Returns:
             torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
         """
-        return _logreg_torch(X=val_X, y=val_y, verbose=verbose, epochs=self.epochs_, C=self.base_C_)
+        return _logreg_torch(X=val_X, y=val_y, verbose=verbose, max_iter=self.max_iter_, C=self.base_C_)
 
 
 
@@ -971,7 +1026,8 @@ comb_methods = {"lda": [lda, {"req_val": True}],
                 "neural_m1": [neural, {"coupling_method": "m1"}],
                 "neural_m2": [neural, {"coupling_method": "m2"}],
                 "neural_bc": [neural, {"coupling_method": "bc"}],
-                "logreg_torch": [logreg_torch, {"fit_interc": True, "req_val": True}]
+                "logreg_torch": [logreg_torch, {"fit_interc": True, "req_val": True}],
+                "logreg_torch_no_interc": [logreg_torch, {"fit_interc": False, "req_val": False}]
                 }
 
 
