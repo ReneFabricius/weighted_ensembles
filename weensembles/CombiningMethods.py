@@ -1,3 +1,4 @@
+from email.mime import base
 import re
 from textwrap import fill
 from attr import has
@@ -365,322 +366,68 @@ class GeneralLinearCombiner(GeneralCombiner):
         preds = torch.argmax(prob, dim=1)
         return torch.sum(preds == y).item() / len(y)
     
-@torch.no_grad()
-def _logreg_sweep_C(X, y, val_X, val_y, fit_intercept=False, verbose=0, device="cpu", dtype=torch.float):
-    """
-    Performs hyperparameter sweep for regularization parameter C of logistic regression.
+    def _transform_for_pairwise_fit(self, X, y):
+        """
+        Transforms data into format for feeding into pairwise models. Each class must have the same number of samples.
+        Resulting features are organized in a class by class manner, this is represented by dimensions k x k.
+        Data at position k1, k2 belong either to the class k1 or k2. This can be determined from the tensor of transformed labels where data which belong
+        to the class k1 have label 1 and data which belong to the class k2 have label 0.
 
-    Args:
-        X (torch.tensor): Tensor of training predictions of combined classifiers, shape number of samples × number of combined classifiers. 
-        y (torch.tensor): Training labels. 
-        val_X (torch.tensor): Tensor of validation predicitions of combined classifiers, shape number of samples × number of combined classifiers.
-        val_y (torch.tensor): Validation labels.
-        fit_intercept (bool, optional): Whether to use intercept in the model. Defaults to False.
-        verbose (int, optional): Verbosity level. Defaults to 0.
+        Args:
+            X (torch.tensor): Input features. Shape c x n x k
+            y (torch.tensor): Input labels. Shape n.
 
-    Returns:
-        torch.tensor: Coefficients of trained logistic regression model with determined C hyperparameter.
-    """
-    if verbose > 1:
-        print("Searching for best C value")
-    E_start = -3
-    E_end = 3
-    E_count = 31
-    C_vals = 10**np.linspace(start=E_start, stop=E_end,
-                        num=E_count, endpoint=True)
-    
-    best_C = 1.0
-    best_acc = 0.0
-    best_model = None
-    for C_val in C_vals:
-        if verbose > 1:
-            print("Testing C value {}".format(C_val))
-        clf = LogisticRegression(penalty='l2', fit_intercept=fit_intercept, verbose=max(verbose - 1, 0), C=C_val)
-        clf.fit(X.cpu(), y.cpu())
-        cur_acc = clf.score(val_X.cpu(), val_y.cpu())
-        if verbose > 1:
-            print("C value {}, validation accuracy {}".format(C_val, cur_acc))
-        if cur_acc > best_acc:
-            best_acc = cur_acc
-            best_C = C_val
-            best_model = clf
-    
-    if verbose > 1:
-        print("C value {} chosen with validation accuracy {}".format(best_C, best_acc))    
-        
-    coefs = torch.cat((torch.tensor(best_model.coef_, device=device, dtype=dtype).squeeze(),
-                       torch.tensor(best_model.intercept_, device=device, dtype=dtype)))
-
-    return coefs, best_C
-
-
-def _averaging_coefs(X, y, val_X=None, val_y=None, calibrate=False, comb_probs=False, device="cpu", dtype=torch.float, verbose=0):
-    """Computes coefficients for averaging family of combining methods.
-
-    Args:
-        X (torch.tensor): Tensor of training predictors. Shape c × n × k. Where c is number of combined classifiers, 
-        n is number of trainign samples and k is number of classes.
-        y (torch.tensor): Tensor of training labels. Shape n - number of training samples.
-        val_X (torch.tensor, optional): Tensor of validation predictors. Shape c × n × k. Where c is number of combined classifiers, 
-        n is number of validation samples and k is number of classes Defaults to None.
-        val_y (torch.tensor, optional): Tensor of validation labels. Shape n - number of validation samples. Defaults to None.
-        calibrate (bool, optional): Whether to perform calibrated average. Defaults to False.
-        comb_probs (bool, optional): Whether to combine probabilities, not logits. Defaults to False.
-        device (str, optional): Device of which to perform computations and return coefficients. Defaults to "cpu".
-        dtype (torch.dtype, optional): Requested dtype of coefficients and computations. Defaults to torch.float.
-        verbose (int, optional): Verbosity level. Defaults to 0.
-
-    Returns:
-        torch.tensor: Tensor of combining coefficients. Shape k × k × (c + 1), where k is number of classes and c is number of combined classifiers.
-    """
-    if calibrate:
-        c, n, k = val_X.shape
-        coefs = torch.zeros(size=(c + 1, ), device=device, dtype=dtype)
-        for ci in range(c):
-            ts = TemperatureScaling(device=device, dtp=dtype)
-            ts.fit(val_X[ci], val_y, verbose=verbose)
-            coefs[ci] = 1.0 / ts.temp_.item()
-
-    else:
+        Returns:
+            torch.tensor, torch.tensor, torch.tensor: Returns three tensors.
+            First is tensor of transformed features. This has shape 2*nk x k x k x c, where nk is number of samples per class.
+            Second is tensor of thansformed labels. This has shape 2*nk x k x k.
+            Third is tensor containing upper triangle mask uf the shape k x k.
+        """
         c, n, k = X.shape
-        if comb_probs:
-            coefs = torch.ones(size=(c + 1, ), device=device, dtype=dtype)
-        else:
-            coefs = torch.full(size=(c + 1, ), fill_value=1.0 / c, device=device, dtype=dtype)
+        nk = n // k
+        dev = X.device
+        dtp = X.dtype
         
-        coefs[c] = 0
-    
-    return coefs.expand(k, k, -1)
+        # Create boolean mask with upper triangle indices True
+        tinds = torch.triu_indices(row=k, col=k, offset=1)
+        uppr_mask = torch.zeros(k, k, dtype=torch.bool, device=dev)
+        uppr_mask.index_put_(indices=(tinds[0], tinds[1]), values=torch.tensor([True], dtype=torch.bool, device=dev))
+        
+        y = y.unsqueeze(1).unsqueeze(2).expand(n, k, k)
+        cl = torch.tensor(range(k), device=dev).unsqueeze(1).expand(k, k)
+        non_diag = torch.eye(k, k, device=dev) != 1
+        # src_mask has shape n x k x k. src_mask[i, k1, k2] contains True if sample i belongs to class k1 or k2.
+        src_mask = ((y == cl) + (y == cl.t())) * non_diag
+        # Lower indices move slower in the masked select. Permute src_mask dimensions, so the picked elements are ordered by first and second class.
+        src_mask = torch.permute(src_mask, (1, 2, 0))
 
-
-def _grad_comb(X, y, combiner, coupling_method, verbose=0, epochs=10, lr=0.3, momentum=0.85, test_period=None, batch_sz=500, C=1.0):
-    """Trains combining coefficients in end-to-end manner by gradient descent method.
-
-    Args:
-        X (torch.tensor): Tensor of training predictors. Shape c × n × k. Where c is number of combined classifiers, n is number of training samples and k is number of classes.
-        y (torch.tensor): Tensor of training labels. Shape n - number of training samples.
-        wle (WeightedLinearEnsemble): WeightedLinearEnsemble model for which the coefficients are trained. Prediction method of this model is needed.
-        coupling_method (str): Name of coupling method to be used for training.
-        verbose (int, optional): Level of verbosity. Defaults to 0.
-        epochs (int, optional): Number of epochs. Defaults to 10.
-        lr (float, optional): Learning rate. Defaults to 0.3.
-        momentum (float, optional): Momentum. Defaults to 0.85.
-        test_period (int, optional): If not None, period in which testing pass is performed. Defaults to None.
-        batch_sz (int, optional): Batch size. Defaults to 500.
-
-    Raises:
-        rerr: Possible cuda memory error.
-
-    Returns:
-        torch.tensor: Tensor of model coefficients. Shape k × k × (c + 1). Where k is number of classes and c is number of combined classifiers.
-    """
-    if verbose > 0:
-        print("Starting grad_{} fit".format(coupling_method))
-    c, n, k = X.shape
-    
-    coefs = torch.full(size=(k, k, c + 1), fill_value=1.0 / c, device=X.device, dtype=X.dtype)
-    coefs[:, :, c] = 0
-    coefs.requires_grad_(True)
-    X.requires_grad_(False)
-    y.requires_grad_(False)
-    nll_loss = torch.nn.NLLLoss()
-    opt = torch.optim.SGD(params=(coefs,), lr=lr, momentum=momentum)
-    thr_value = 1e-9
-    thresh = torch.nn.Threshold(threshold=thr_value, value=thr_value)
-    
-    if test_period is not None:
-        with torch.no_grad():
-            test_bsz = X.shape[1]
-            test_pred = cuda_mem_try(
-                fun=lambda bsz: combiner.predict_proba(X=X, l=k, coupling_method=coupling_method, verbose=max(verbose - 2, 0), batch_size=bsz, coefs=coefs),
-                start_bsz=test_bsz, verbose=verbose, device=X.device)
+        dest_mask = torch.permute(non_diag.unsqueeze(0).expand(2 * nk, k, k), (1, 2, 0))
+        # dest_mask contains true everywhere except on the main diagonal of a k x k matrix.    
             
-            acc = compute_acc_topk(pred=test_pred, tar=y, k=1)
-            nll = compute_nll(pred=test_pred, tar=y)
-            print("Before training: acc {}, nll {}".format(acc, nll))
+        tars_src = torch.zeros(n, k, k, device=dev)
+        # Class given by row index has label 1. 
+        tars_src[(y == cl) * non_diag] = 1.0
+        # Permute dimensions, so the masked select is ordered first by class dimensions.
+        tars_src = torch.permute(tars_src, (1, 2, 0))
+        y_pw = torch.zeros(k, k, 2 * nk, device=dev)
+        y_pw[dest_mask] = tars_src[src_mask]
+        y_pw = torch.permute(y_pw, (2, 0, 1))
 
-    for e in range(epochs):
-        if verbose > 1:
-            print("Processing epoch {} out of {}".format(e, epochs))
-        perm = torch.randperm(n=n, device=X.device)
-        X_perm = X[:, perm]
-        y_perm = y[perm]
-        for batch_s in range(0, n, batch_sz):
-            X_batch = X_perm[:, batch_s:(batch_s + batch_sz)]
-            y_batch = y_perm[batch_s:(batch_s + batch_sz)]
-            if verbose > 1:
-                print("Epoch {}: [{}/{}]".format(e, batch_s + len(y_batch), n))
-
-            mbatch_sz = batch_sz
-            finished = False
-            
-            while not finished and mbatch_sz > 0:
-                try:
-                    opt.zero_grad()
-                    if verbose > 1:
-                        print("Trying micro batch size {}".format(mbatch_sz))
-                    for mbatch_s in range(0, len(y_batch), mbatch_sz):
-                        X_mb = X_batch[:, mbatch_s:(mbatch_s + mbatch_sz)]
-                        y_mb = y_batch[mbatch_s:(mbatch_s + mbatch_sz)]
-                        pred = thresh(combiner.predict_proba(X=X_mb, l=k, coupling_method=coupling_method,
-                                                             verbose=max(verbose - 2, 0), batch_size=mbatch_sz, coefs=coefs))
-                        loss = nll_loss(torch.log(pred), y_mb) * (len(y_mb) / len(y_batch))
-                        L2 = torch.sum(torch.pow(coefs[:,:,:-1], 2)) / (k * (k - 1) * c)
-                        loss = loss + L2 / C
-                        if verbose > 1:
-                            print("Loss: {}".format(loss))
-                        loss.backward()
-                    
-                    opt.step()
-                    finished = True
-
-                except RuntimeError as rerr:
-                    if 'memory' not in str(rerr) and "CUDA" not in str(rerr):
-                        raise rerr
-                    if verbose > 1:
-                        print("OOM Exception")
-                    del rerr
-                    mbatch_sz = int(0.5 * mbatch_sz)
-                    with torch.cuda.device(X.device):
-                        torch.cuda.empty_cache()
-            
-        if test_period is not None and (e + 1) % test_period == 0:
-            with torch.no_grad():
-                test_pred = cuda_mem_try(
-                    fun=lambda bsz: combiner.predict_proba(X=X, l=k, coupling_method=coupling_method, verbose=max(verbose - 2, 0), batch_size=bsz, coefs=coefs),
-                    start_bsz=test_bsz, verbose=verbose, device=X.device)
-
-                acc = compute_acc_topk(pred=test_pred, tar=y, k=1)
-                nll = compute_nll(pred=test_pred, tar=y)
-                print("Test epoch {}: acc {}, nll {}".format(e, acc, nll))
-
-    coefs.requires_grad_(False)
-    return coefs
-
-def _transform_for_pairwise_fit(X, y):
-    """
-    Transforms data into format for feeding into pairwise models. Each class must have the same number of samples.
-    Resulting features are organized in a class by class manner, this is represented by dimensions k x k.
-    Data at position k1, k2 belong either to the class k1 or k2. This can be determined from the tensor of transformed labels where data which belong
-    to the class k1 have label 1 and data which belong to the class k2 have label 0.
-
-    Args:
-        X (torch.tensor): Input features. Shape c x n x k
-        y (torch.tensor): Input labels. Shape n.
-
-    Returns:
-        torch.tensor, torch.tensor, torch.tensor: Returns three tensors.
-        First is tensor of transformed features. This has shape 2*nk x k x k x c, where nk is number of samples per class.
-        Second is tensor of thansformed labels. This has shape 2*nk x k x k.
-        Third is tensor containing upper triangle mask uf the shape k x k.
-    """
-    c, n, k = X.shape
-    nk = n // k
-    dev = X.device
-    dtp = X.dtype
-    
-    # Create boolean mask with upper triangle indices True
-    tinds = torch.triu_indices(row=k, col=k, offset=1)
-    uppr_mask = torch.zeros(k, k, dtype=torch.bool, device=dev)
-    uppr_mask.index_put_(indices=(tinds[0], tinds[1]), values=torch.tensor([True], dtype=torch.bool, device=dev))
-    
-    y = y.unsqueeze(1).unsqueeze(2).expand(n, k, k)
-    cl = torch.tensor(range(k), device=dev).unsqueeze(1).expand(k, k)
-    non_diag = torch.eye(k, k, device=dev) != 1
-    # src_mask has shape n x k x k. src_mask[i, k1, k2] contains True if sample i belongs to class k1 or k2.
-    src_mask = ((y == cl) + (y == cl.t())) * non_diag
-    # Lower indices move slower in the masked select. Permute src_mask dimensions, so the picked elements are ordered by first and second class.
-    src_mask = torch.permute(src_mask, (1, 2, 0))
-
-    dest_mask = torch.permute(non_diag.unsqueeze(0).expand(2 * nk, k, k), (1, 2, 0))
-    # dest_mask contains true everywhere except on the main diagonal of a k x k matrix.    
+        # Expand by second class index
+        X = torch.permute(X.unsqueeze(3).expand(c, n, k, k), (2, 3, 0, 1))
+        X_pw = torch.zeros(k, k, c, 2 * nk, device=dev, dtype=dtp)
+        # Expand by feature dimension (c)
+        src_mask = src_mask.unsqueeze(2).expand(k, k, c, n)
+        dest_mask = dest_mask.unsqueeze(2).expand(k, k, c, 2 * nk)
+        # Compute difference: first(row) class logit - second(column) class logit.
+        X_pw[dest_mask] = X[src_mask] - X.transpose(0, 1)[src_mask]
+        X_pw = torch.permute(X_pw, (3, 0, 1, 2))
         
-    tars_src = torch.zeros(n, k, k, device=dev)
-    # Class given by row index has label 1. 
-    tars_src[(y == cl) * non_diag] = 1.0
-    # Permute dimensions, so the masked select is ordered first by class dimensions.
-    tars_src = torch.permute(tars_src, (1, 2, 0))
-    y_pw = torch.zeros(k, k, 2 * nk, device=dev)
-    y_pw[dest_mask] = tars_src[src_mask]
-    y_pw = torch.permute(y_pw, (2, 0, 1))
-
-    # Expand by second class index
-    X = torch.permute(X.unsqueeze(3).expand(c, n, k, k), (2, 3, 0, 1))
-    X_pw = torch.zeros(k, k, c, 2 * nk, device=dev, dtype=dtp)
-    # Expand by feature dimension (c)
-    src_mask = src_mask.unsqueeze(2).expand(k, k, c, n)
-    dest_mask = dest_mask.unsqueeze(2).expand(k, k, c, 2 * nk)
-    # Compute difference: first(row) class logit - second(column) class logit.
-    X_pw[dest_mask] = X[src_mask] - X.transpose(0, 1)[src_mask]
-    X_pw = torch.permute(X_pw, (3, 0, 1, 2))
-    
-    return X_pw, y_pw, uppr_mask
+        return X_pw, y_pw, uppr_mask
 
 
-def _logreg_torch(X, y, fit_intercept=True, verbose=0, max_iter=1000, micro_batch=None, C=1.0):
-    """Trains multiple logistic regression models using parallelism 
 
-    Args:
-        X (torch.tensor): Tensor of training predictors. Shape c × n × k. Where c is number of combined classifiers, n is number of training samples and k is number of classes.
-        y (torch.tensor): Tensor of training labels. Shape n - number of training samples.
-        fit_intercept (bool, optional): Whether to fit intercept. Defaults to True.
-        verbose (int, optional): Verbosity level. Defaults to 0.
-        max_iter (int, optional): Maximum number of iterations of the LBFGS optimizer. Defaults to 1000.
-        micro_batch (_type_, optional): Micro batch size. If None, no micro batching is performed. Defaults to None.
-        C (float, optional): Regularization coefficient. Defaults to 1.0.
-
-    Returns:
-        torch.tensor: fitted coefficients. shape: k x k x c + int(fit_intercept). Only models where k1 < k2 have nonzero coefficients.
-    """
-    if verbose > 0:
-        print("Starting logreg_torch fit")
-    c, n, k = X.shape
-    
-    coefs = torch.zeros(size=(k, k, c + int(fit_intercept)), device=X.device, dtype=X.dtype, requires_grad=True)
-    X.requires_grad_(False)
-    y.requires_grad_(False)
-    # TODO change to mean and modify C
-    bce_loss = torch.nn.BCEWithLogitsLoss(reduction="sum")
-    opt = torch.optim.LBFGS(params=(coefs,), max_iter=max_iter)
-
-    X_pw, y_pw, upper_mask = _transform_for_pairwise_fit(X, y)
-    
-    if micro_batch is None:
-        micro_batch = X_pw.shape[0]
-                    
-    def closure_loss():
-        opt.zero_grad()
-        if fit_intercept:
-            Ws = coefs[:, :, 0:-1]
-            Bs = coefs[:, :, -1]
-        
-        loss = torch.tensor([0], device=X_pw.device, dtype=X_pw.dtype) 
-        for mbs in range(0, X_pw.shape[0], micro_batch):
-            cur_X = X_pw[mbs : mbs + micro_batch]
-            cur_y = y_pw[mbs : mbs + micro_batch]
-            if fit_intercept:        
-                lin_comb = torch.sum(Ws * cur_X, dim=-1) + Bs
-            else:
-                lin_comb = torch.sum(coefs * cur_X, dim=-1)
-
-            loss += bce_loss(torch.permute(lin_comb, (1, 2, 0))[upper_mask], torch.permute(cur_y, (1, 2, 0))[upper_mask])
-        
-        if fit_intercept:
-            L2 = torch.sum(torch.pow(coefs[:,:,:-1][upper_mask], 2))
-        else:
-            L2 = torch.sum(torch.pow(coefs[upper_mask], 2))
-        loss += L2 / 2.0 / C
-
-        loss.backward(retain_graph=True)
-        return loss
-        
-    opt.step(closure_loss)
-    
-    coefs.requires_grad_(False)
-    return coefs
-
-
-class lda(GeneralLinearCombiner):
+class Lda(GeneralLinearCombiner):
     """Combining method which uses Linear DIscriminant Analysis to infer combining coefficients.
     """
     def __init__(self, c, k, uncert, name, req_val, device="cpu", dtype=torch.float):
@@ -709,14 +456,42 @@ class lda(GeneralLinearCombiner):
         return coefs
 
 
-class logreg(GeneralLinearCombiner):
+class GeneralLogreg(GeneralLinearCombiner):
+    def __init__(self, c, k, fit_interc, name, req_val, uncert, fit_pairwise, device="cpu", dtype=torch.float, base_C=1.0):
+        super.__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=fit_pairwise,
+                       combine_probs=False, device=device, dtype=dtype, name=name)
+        self.fit_interc_ = fit_interc
+        self.base_C_ = base_C
+
+    def _bce_loss_pw(self, X, y):
+        X_pw, y_pw, uppr_mask = self._transform_for_pairwise_fit(X, y)
+        bce_loss = torch.nn.BCEWithLogitsLoss(reduction="none")
+        if self.fit_interc_:
+            Ws = self.coefs_[:, :, 0:-1]
+            Bs = self.coefs_[:, :, -1]
+            lin_comb = torch.sum(Ws * X_pw, dim=-1) + Bs
+        else:
+            lin_comb = torch.sum(self.coefs_ * X_pw, dim=-1)
+            
+        loss = bce_loss(torch.permute(lin_comb, (1, 2, 0))[uppr_mask], torch.permute(y_pw, (1, 2, 0))[uppr_mask])
+        loss = torch.sum(loss, dim=-1)
+        
+        if self.fit_interc_:    
+            l2_pen = torch.sum(torch.pow(self.coefs_[:, :, :-1][uppr_mask], 2), dim=-1)
+        else:
+            l2_pen = torch.sum(torch.pow(self.coefs_[uppr_mask], 2), dim=-1)    
+        
+        loss += l2_pen / self.base_C_ / 2
+        
+        return loss
+
+
+class Logreg(GeneralLogreg):
     """Combining method which uses Logistic Regression to infer combining coefficients.
     """
     def __init__(self, c, k, fit_interc, sweep_C, name, req_val, uncert, device="cpu", dtype=torch.float, base_C=1.0):
-        super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype, name=name)
-        self.fit_interc_ = fit_interc
+        super().__init__(c=c, k=k, fit_interc=fit_interc, uncert=uncert, req_val=req_val, fit_pairwise=True, device=device, dtype=dtype, base_C=base_C, name=name)
         self.sweep_C_ = sweep_C
-        self.base_C_ = base_C
         
     def train(self, X, y, val_X, val_y, verbose=0):
         """Trains logistic regression model for a pair of classes and outputs its coefficients.
@@ -734,8 +509,7 @@ class logreg(GeneralLinearCombiner):
             torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
         """
         if self.sweep_C_:
-            coefs, best_C = _logreg_sweep_C(val_X, val_y, val_X=X, val_y=y, fit_intercept=self.fit_interc_, verbose=verbose,
-                                            device=self.dev_, dtype=self.dtp_)
+            coefs, best_C = self._logreg_sweep_C(val_X, val_y, val_X=X, val_y=y, verbose=verbose)
         else:
             clf = LogisticRegression(fit_intercept=self.fit_interc_, C=self.base_C_)
             clf.fit(val_X.cpu(), val_y.cpu())
@@ -746,15 +520,62 @@ class logreg(GeneralLinearCombiner):
         
         return coefs
     
+    @torch.no_grad()
+    def _logreg_sweep_C(self, X, y, val_X, val_y, verbose=0):
+        """
+        Performs hyperparameter sweep for regularization parameter C of logistic regression.
 
-class logreg_torch(GeneralLinearCombiner):
+        Args:
+            X (torch.tensor): Tensor of training predictions of combined classifiers, shape number of samples × number of combined classifiers. 
+            y (torch.tensor): Training labels. 
+            val_X (torch.tensor): Tensor of validation predicitions of combined classifiers, shape number of samples × number of combined classifiers.
+            val_y (torch.tensor): Validation labels.
+            fit_intercept (bool, optional): Whether to use intercept in the model. Defaults to False.
+            verbose (int, optional): Verbosity level. Defaults to 0.
+
+        Returns:
+            torch.tensor: Coefficients of trained logistic regression model with determined C hyperparameter.
+        """
+        if verbose > 1:
+            print("Searching for best C value")
+        E_start = -3
+        E_end = 3
+        E_count = 31
+        C_vals = 10**np.linspace(start=E_start, stop=E_end,
+                            num=E_count, endpoint=True)
+        
+        best_C = 1.0
+        best_acc = 0.0
+        best_model = None
+        for C_val in C_vals:
+            if verbose > 1:
+                print("Testing C value {}".format(C_val))
+            clf = LogisticRegression(penalty='l2', fit_intercept=self.fit_intercept_, verbose=max(verbose - 1, 0), C=C_val)
+            clf.fit(X.cpu(), y.cpu())
+            cur_acc = clf.score(val_X.cpu(), val_y.cpu())
+            if verbose > 1:
+                print("C value {}, validation accuracy {}".format(C_val, cur_acc))
+            if cur_acc > best_acc:
+                best_acc = cur_acc
+                best_C = C_val
+                best_model = clf
+        
+        if verbose > 1:
+            print("C value {} chosen with validation accuracy {}".format(best_C, best_acc))    
+            
+        coefs = torch.cat((torch.tensor(best_model.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
+                        torch.tensor(best_model.intercept_, device=self.dev_, dtype=self.dtp_)))
+
+        return coefs, best_C
+
+
+class LogregTorch(GeneralLogreg):
     """Combining method which uses logistic regression implemented in pytorch to infer combining coefficients.
     """
     def __init__(self, c, k, fit_interc, name, req_val, uncert, device="cpu", dtype=torch.float, base_C=1.0, max_iter=1000):
-        super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype, name=name)
-        self.fit_interc_ = fit_interc
+        super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=False, combine_probs=False, fit_interc=fit_interc,
+                         base_C=base_C, device=device, dtype=dtype, name=name)
         self.max_iter_ = int(max_iter)
-        self.base_C_ = base_C
         
     def train(self, X, y, val_X, val_y, verbose=0):
         """Trains logistic regression model for a pair of classes and outputs its coefficients.
@@ -771,11 +592,72 @@ class logreg_torch(GeneralLinearCombiner):
         Returns:
             torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
         """
-        return _logreg_torch(X=val_X, y=val_y, verbose=verbose, max_iter=self.max_iter_, C=self.base_C_)
+        return self._logreg_torch(X=val_X, y=val_y, verbose=verbose)
+
+    def _logreg_torch(self, X, y, fit_intercept=True, verbose=0, micro_batch=None):
+        """Trains multiple logistic regression models using parallelism 
+
+        Args:
+            X (torch.tensor): Tensor of training predictors. Shape c × n × k. Where c is number of combined classifiers, n is number of training samples and k is number of classes.
+            y (torch.tensor): Tensor of training labels. Shape n - number of training samples.
+            fit_intercept (bool, optional): Whether to fit intercept. Defaults to True.
+            verbose (int, optional): Verbosity level. Defaults to 0.
+            max_iter (int, optional): Maximum number of iterations of the LBFGS optimizer. Defaults to 1000.
+            micro_batch (_type_, optional): Micro batch size. If None, no micro batching is performed. Defaults to None.
+            C (float, optional): Regularization coefficient. Defaults to 1.0.
+
+        Returns:
+            torch.tensor: fitted coefficients. shape: k x k x c + int(fit_intercept). Only models where k1 < k2 have nonzero coefficients.
+        """
+        if verbose > 0:
+            print("Starting logreg_torch fit")
+        c, n, k = X.shape
+        
+        coefs = torch.zeros(size=(k, k, c + int(fit_intercept)), device=X.device, dtype=X.dtype, requires_grad=True)
+        X.requires_grad_(False)
+        y.requires_grad_(False)
+        # TODO change to mean and modify C
+        bce_loss = torch.nn.BCEWithLogitsLoss(reduction="sum")
+        opt = torch.optim.LBFGS(params=(coefs,), max_iter=self.max_iter_)
+
+        X_pw, y_pw, upper_mask = self._transform_for_pairwise_fit(X, y)
+        
+        if micro_batch is None:
+            micro_batch = X_pw.shape[0]
+                        
+        def closure_loss():
+            opt.zero_grad()
+            if fit_intercept:
+                Ws = coefs[:, :, 0:-1]
+                Bs = coefs[:, :, -1]
+            
+            loss = torch.tensor([0], device=X_pw.device, dtype=X_pw.dtype) 
+            for mbs in range(0, X_pw.shape[0], micro_batch):
+                cur_X = X_pw[mbs : mbs + micro_batch]
+                cur_y = y_pw[mbs : mbs + micro_batch]
+                if fit_intercept:        
+                    lin_comb = torch.sum(Ws * cur_X, dim=-1) + Bs
+                else:
+                    lin_comb = torch.sum(coefs * cur_X, dim=-1)
+
+                loss += bce_loss(torch.permute(lin_comb, (1, 2, 0))[upper_mask], torch.permute(cur_y, (1, 2, 0))[upper_mask])
+            
+            if fit_intercept:
+                L2 = torch.sum(torch.pow(coefs[:,:,:-1][upper_mask], 2))
+            else:
+                L2 = torch.sum(torch.pow(coefs[upper_mask], 2))
+            loss += L2 / 2.0 / self.base_C_
+
+            loss.backward(retain_graph=True)
+            return loss
+            
+        opt.step(closure_loss)
+        
+        coefs.requires_grad_(False)
+        return coefs
 
 
-
-class average(GeneralLinearCombiner):
+class Average(GeneralLinearCombiner):
     """Combining method which averages logits of combined classifiers.
     """
     def __init__(self, c, k, name, calibrate, combine_probs, req_val, uncert, device="cpu", dtype=torch.float):
@@ -796,11 +678,49 @@ class average(GeneralLinearCombiner):
         Returns:
             torch.tensor: Computed coefficients. Tensor of shape k × k × (c + 1), where k is number of classes and c in number of combined classifiers.
         """
-        coefs = _averaging_coefs(X=X, y=y, val_X=val_X, val_y=val_y, calibrate=self.calibrate_, comb_probs=self.combine_probs_, device=self.dev_, dtype=self.dtp_, verbose=verbose)
+        coefs = self._averaging_coefs(X=X, y=y, val_X=val_X, val_y=val_y, verbose=verbose)
         return coefs        
 
+    def _averaging_coefs(self, X, y, val_X=None, val_y=None, verbose=0):
+        """Computes coefficients for averaging family of combining methods.
 
-class grad(GeneralLinearCombiner):
+        Args:
+            X (torch.tensor): Tensor of training predictors. Shape c × n × k. Where c is number of combined classifiers, 
+            n is number of trainign samples and k is number of classes.
+            y (torch.tensor): Tensor of training labels. Shape n - number of training samples.
+            val_X (torch.tensor, optional): Tensor of validation predictors. Shape c × n × k. Where c is number of combined classifiers, 
+            n is number of validation samples and k is number of classes Defaults to None.
+            val_y (torch.tensor, optional): Tensor of validation labels. Shape n - number of validation samples. Defaults to None.
+            calibrate (bool, optional): Whether to perform calibrated average. Defaults to False.
+            comb_probs (bool, optional): Whether to combine probabilities, not logits. Defaults to False.
+            device (str, optional): Device of which to perform computations and return coefficients. Defaults to "cpu".
+            dtype (torch.dtype, optional): Requested dtype of coefficients and computations. Defaults to torch.float.
+            verbose (int, optional): Verbosity level. Defaults to 0.
+
+        Returns:
+            torch.tensor: Tensor of combining coefficients. Shape k × k × (c + 1), where k is number of classes and c is number of combined classifiers.
+        """
+        if self.calibrate_:
+            c, n, k = val_X.shape
+            coefs = torch.zeros(size=(c + 1, ), device=self.dev_, dtype=self.dtp_)
+            for ci in range(c):
+                ts = TemperatureScaling(device=self.dev_, dtp=self.dtp_)
+                ts.fit(val_X[ci], val_y, verbose=verbose)
+                coefs[ci] = 1.0 / ts.temp_.item()
+
+        else:
+            c, n, k = X.shape
+            if self.combine_probs_:
+                coefs = torch.ones(size=(c + 1, ), device=self.dev_, dtype=self.dtp_)
+            else:
+                coefs = torch.full(size=(c + 1, ), fill_value=1.0 / c, device=self.dev_, dtype=self.dtp_)
+            
+            coefs[c] = 0
+        
+        return coefs.expand(k, k, -1)
+
+
+class Grad(GeneralLinearCombiner):
     """Combining method which trains its coefficient in an end-to-end manner using gradient descent.
     """
     def __init__(self, c, k, coupling_method, uncert, name, device="cpu", dtype=torch.float, base_C=1.0):
@@ -823,7 +743,111 @@ class grad(GeneralLinearCombiner):
         Returns:
             torch.tensor: Computed coefficients. Tensor of shape k × k × (c + 1), where k is number of classes and c in number of combined classifiers.
         """
-        return _grad_comb(X=val_X, y=val_y, combiner=self, coupling_method=self.coupling_m_, verbose=verbose, C=self.base_C_)
+        return self._grad_comb(X=val_X, y=val_y, verbose=verbose)
+
+    def _grad_comb(self, X, y, verbose=0, epochs=10, lr=0.3, momentum=0.85, test_period=None, batch_sz=500):
+        """Trains combining coefficients in end-to-end manner by gradient descent method.
+
+        Args:
+            X (torch.tensor): Tensor of training predictors. Shape c × n × k. Where c is number of combined classifiers, n is number of training samples and k is number of classes.
+            y (torch.tensor): Tensor of training labels. Shape n - number of training samples.
+            wle (WeightedLinearEnsemble): WeightedLinearEnsemble model for which the coefficients are trained. Prediction method of this model is needed.
+            coupling_method (str): Name of coupling method to be used for training.
+            verbose (int, optional): Level of verbosity. Defaults to 0.
+            epochs (int, optional): Number of epochs. Defaults to 10.
+            lr (float, optional): Learning rate. Defaults to 0.3.
+            momentum (float, optional): Momentum. Defaults to 0.85.
+            test_period (int, optional): If not None, period in which testing pass is performed. Defaults to None.
+            batch_sz (int, optional): Batch size. Defaults to 500.
+
+        Raises:
+            rerr: Possible cuda memory error.
+
+        Returns:
+            torch.tensor: Tensor of model coefficients. Shape k × k × (c + 1). Where k is number of classes and c is number of combined classifiers.
+        """
+        if verbose > 0:
+            print("Starting grad_{} fit".format(self.coupling_m_))
+        c, n, k = X.shape
+        
+        coefs = torch.full(size=(k, k, c + 1), fill_value=1.0 / c, device=self.dev_, dtype=self.dtp_)
+        coefs[:, :, c] = 0
+        coefs.requires_grad_(True)
+        X.requires_grad_(False)
+        y.requires_grad_(False)
+        nll_loss = torch.nn.NLLLoss()
+        opt = torch.optim.SGD(params=(coefs,), lr=lr, momentum=momentum)
+        thr_value = 1e-9
+        thresh = torch.nn.Threshold(threshold=thr_value, value=thr_value)
+        
+        if test_period is not None:
+            with torch.no_grad():
+                test_bsz = X.shape[1]
+                test_pred = cuda_mem_try(
+                    fun=lambda bsz: self.predict_proba(X=X, l=k, coupling_method=self.coupling_m_, verbose=max(verbose - 2, 0), batch_size=bsz, coefs=coefs),
+                    start_bsz=test_bsz, verbose=verbose, device=X.device)
+                
+                acc = compute_acc_topk(pred=test_pred, tar=y, k=1)
+                nll = compute_nll(pred=test_pred, tar=y)
+                print("Before training: acc {}, nll {}".format(acc, nll))
+
+        for e in range(epochs):
+            if verbose > 1:
+                print("Processing epoch {} out of {}".format(e, epochs))
+            perm = torch.randperm(n=n, device=X.device)
+            X_perm = X[:, perm]
+            y_perm = y[perm]
+            for batch_s in range(0, n, batch_sz):
+                X_batch = X_perm[:, batch_s:(batch_s + batch_sz)]
+                y_batch = y_perm[batch_s:(batch_s + batch_sz)]
+                if verbose > 1:
+                    print("Epoch {}: [{}/{}]".format(e, batch_s + len(y_batch), n))
+
+                mbatch_sz = batch_sz
+                finished = False
+                
+                while not finished and mbatch_sz > 0:
+                    try:
+                        opt.zero_grad()
+                        if verbose > 1:
+                            print("Trying micro batch size {}".format(mbatch_sz))
+                        for mbatch_s in range(0, len(y_batch), mbatch_sz):
+                            X_mb = X_batch[:, mbatch_s:(mbatch_s + mbatch_sz)]
+                            y_mb = y_batch[mbatch_s:(mbatch_s + mbatch_sz)]
+                            pred = thresh(self.predict_proba(X=X_mb, l=k, coupling_method=self.coupling_m_,
+                                                                verbose=max(verbose - 2, 0), batch_size=mbatch_sz, coefs=coefs))
+                            loss = nll_loss(torch.log(pred), y_mb) * (len(y_mb) / len(y_batch))
+                            L2 = torch.sum(torch.pow(coefs[:,:,:-1], 2)) / (k * (k - 1) * c)
+                            loss = loss + L2 / self.base_C_
+                            if verbose > 1:
+                                print("Loss: {}".format(loss))
+                            loss.backward()
+                        
+                        opt.step()
+                        finished = True
+
+                    except RuntimeError as rerr:
+                        if 'memory' not in str(rerr) and "CUDA" not in str(rerr):
+                            raise rerr
+                        if verbose > 1:
+                            print("OOM Exception")
+                        del rerr
+                        mbatch_sz = int(0.5 * mbatch_sz)
+                        with torch.cuda.device(X.device):
+                            torch.cuda.empty_cache()
+                
+            if test_period is not None and (e + 1) % test_period == 0:
+                with torch.no_grad():
+                    test_pred = cuda_mem_try(
+                        fun=lambda bsz: self.predict_proba(X=X, l=k, coupling_method=self.coupling_m_, verbose=max(verbose - 2, 0), batch_size=bsz, coefs=coefs),
+                        start_bsz=test_bsz, verbose=verbose, device=X.device)
+
+                    acc = compute_acc_topk(pred=test_pred, tar=y, k=1)
+                    nll = compute_nll(pred=test_pred, tar=y)
+                    print("Test epoch {}: acc {}, nll {}".format(e, acc, nll))
+
+        coefs.requires_grad_(False)
+        return coefs
 
 
 class Net(torch.nn.Module):
@@ -851,7 +875,7 @@ class Net(torch.nn.Module):
         
         return x
 
-class neural(GeneralCombiner):
+class Neural(GeneralCombiner):
     """Combining method emplying simple neural network for inferring matrix of pairwise probabilities from classifiers logits.
 
     """
@@ -1011,23 +1035,23 @@ class neural(GeneralCombiner):
         return torch.sum(preds == y).item() / len(y)
        
        
-comb_methods = {"lda": [lda, {"req_val": True}],
-                "logreg": [logreg, {"fit_interc": True, "sweep_C": False, "req_val": True}],
-                "logreg_no_interc": [logreg, {"fit_interc": False, "sweep_C": False, "req_val": True}],
-                "logreg_sweep_C": [logreg, {"fit_interc": True, "sweep_C": True, "req_val": True}],
-                "logreg_no_interc_sweep_C": [logreg, {"fit_interc": False, "sweep_C": True, "req_val": True}],
-                "average": [average, {"calibrate": False, "combine_probs": False, "req_val": False}],
-                "cal_average": [average, {"calibrate": True, "combine_probs": False, "req_val": True}],
-                "prob_average": [average, {"calibrate": False, "combine_probs": True, "req_val": False}],
-                "cal_prob_average": [average, {"calibrate": True, "combine_probs": True, "req_val": True}],
-                "grad_m1": [grad, {"coupling_method": "m1"}],
-                "grad_m2": [grad, {"coupling_method": "m2"}],
-                "grad_bc": [grad, {"coupling_method": "bc"}],
-                "neural_m1": [neural, {"coupling_method": "m1"}],
-                "neural_m2": [neural, {"coupling_method": "m2"}],
-                "neural_bc": [neural, {"coupling_method": "bc"}],
-                "logreg_torch": [logreg_torch, {"fit_interc": True, "req_val": True}],
-                "logreg_torch_no_interc": [logreg_torch, {"fit_interc": False, "req_val": False}]
+comb_methods = {"lda": [Lda, {"req_val": True}],
+                "logreg": [Logreg, {"fit_interc": True, "sweep_C": False, "req_val": True}],
+                "logreg_no_interc": [Logreg, {"fit_interc": False, "sweep_C": False, "req_val": True}],
+                "logreg_sweep_C": [Logreg, {"fit_interc": True, "sweep_C": True, "req_val": True}],
+                "logreg_no_interc_sweep_C": [Logreg, {"fit_interc": False, "sweep_C": True, "req_val": True}],
+                "average": [Average, {"calibrate": False, "combine_probs": False, "req_val": False}],
+                "cal_average": [Average, {"calibrate": True, "combine_probs": False, "req_val": True}],
+                "prob_average": [Average, {"calibrate": False, "combine_probs": True, "req_val": False}],
+                "cal_prob_average": [Average, {"calibrate": True, "combine_probs": True, "req_val": True}],
+                "grad_m1": [Grad, {"coupling_method": "m1"}],
+                "grad_m2": [Grad, {"coupling_method": "m2"}],
+                "grad_bc": [Grad, {"coupling_method": "bc"}],
+                "neural_m1": [Neural, {"coupling_method": "m1"}],
+                "neural_m2": [Neural, {"coupling_method": "m2"}],
+                "neural_bc": [Neural, {"coupling_method": "bc"}],
+                "logreg_torch": [LogregTorch, {"fit_interc": True, "req_val": True}],
+                "logreg_torch_no_interc": [LogregTorch, {"fit_interc": False, "req_val": False}]
                 }
 
 
