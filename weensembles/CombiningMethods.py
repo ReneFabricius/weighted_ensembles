@@ -458,7 +458,7 @@ class Lda(GeneralLinearCombiner):
 
 class GeneralLogreg(GeneralLinearCombiner):
     def __init__(self, c, k, fit_interc, name, req_val, uncert, fit_pairwise, device="cpu", dtype=torch.float, base_C=1.0):
-        super.__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=fit_pairwise,
+        super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=fit_pairwise,
                        combine_probs=False, device=device, dtype=dtype, name=name)
         self.fit_interc_ = fit_interc
         self.base_C_ = base_C
