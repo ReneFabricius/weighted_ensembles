@@ -483,7 +483,12 @@ class GeneralLogreg(GeneralLinearCombiner):
         
         loss += l2_pen / self.base_C_ / 2
         
-        return loss
+        c, n, k = X.shape
+        tinds = torch.triu_indices(row=k, col=k, offset=1)
+        pw_loss = torch.zeros(k, k, dtype=self.dtp_, device=self.dev_)
+        pw_loss.index_put_(indices=(tinds[0], tinds[1]), values=loss)
+
+        return pw_loss
 
 
 class Logreg(GeneralLogreg):
