@@ -577,10 +577,16 @@ class Logreg(GeneralLogreg):
 class LogregTorch(GeneralLogreg):
     """Combining method which uses logistic regression implemented in pytorch to infer combining coefficients.
     """
-    def __init__(self, c, k, fit_interc, name, req_val, uncert, device="cpu", dtype=torch.float, base_C=1.0, max_iter=1000):
+    def __init__(self, c, k, fit_interc, name, req_val, uncert, device="cpu", dtype=torch.float, base_C=1.0, max_iter=1000, tolg=1e-5, tolch=1e-9, line_search=False):
         super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=False, fit_interc=fit_interc,
                          base_C=base_C, device=device, dtype=dtype, name=name)
         self.max_iter_ = int(max_iter)
+        self.tolg_ = tolg
+        self.tolch_ = tolch
+        if line_search:
+            self.line_search_ = 'strong_wolfe'
+        else:
+            self.line_search_ = None
         
     def train(self, X, y, val_X, val_y, verbose=0):
         """Trains logistic regression model for a pair of classes and outputs its coefficients.
@@ -623,7 +629,8 @@ class LogregTorch(GeneralLogreg):
         y.requires_grad_(False)
         # TODO change to mean and modify C
         bce_loss = torch.nn.BCEWithLogitsLoss(reduction="sum")
-        opt = torch.optim.LBFGS(params=(coefs,), max_iter=self.max_iter_)
+        opt = torch.optim.LBFGS(params=(coefs,), max_iter=self.max_iter_, tolerance_grad=self.tolg_,
+                                tolerance_change=self.tolch_, line_search_fn=self.line_search_)
 
         X_pw, y_pw, upper_mask = self._transform_for_pairwise_fit(X, y)
         
@@ -1067,11 +1074,16 @@ def arguments_dict(dict_str):
     
     for arg in dict_str.split(","):
         name, value = arg.split(":")
-        try:
-            value = float(value)
-        except ValueError:
-            print("Warning: unsupported argument type in argument-value pair {}".format(arg))
-            continue
+        if value == "True":
+            value = True
+        elif value == "False":
+            value = False
+        else:
+            try:
+                value = float(value)
+            except ValueError:
+                print("Warning: unsupported argument type in argument-value pair {}".format(arg))
+                continue
         
         res[name] = value
     
