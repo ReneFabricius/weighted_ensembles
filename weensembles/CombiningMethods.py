@@ -573,7 +573,7 @@ class LogregTorch(GeneralLogreg):
     """Combining method which uses logistic regression implemented in pytorch to infer combining coefficients.
     """
     def __init__(self, c, k, fit_interc, name, req_val, uncert, device="cpu", dtype=torch.float, base_C=1.0, max_iter=1000):
-        super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=False, combine_probs=False, fit_interc=fit_interc,
+        super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=False, fit_interc=fit_interc,
                          base_C=base_C, device=device, dtype=dtype, name=name)
         self.max_iter_ = int(max_iter)
         
