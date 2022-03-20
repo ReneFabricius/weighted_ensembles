@@ -516,7 +516,9 @@ class Logreg(GeneralLogreg):
         if self.sweep_C_:
             coefs, best_C = self._logreg_sweep_C(val_X, val_y, val_X=X, val_y=y, verbose=verbose)
         else:
-            clf = LogisticRegression(fit_intercept=self.fit_interc_, C=self.base_C_)
+            c, n, k = X.shape
+            corrected_C = c * self.base_C_ / (2 * n)
+            clf = LogisticRegression(fit_intercept=self.fit_interc_, C=corrected_C)
             clf.fit(val_X.cpu(), val_y.cpu())
             coefs = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
                             torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
@@ -552,10 +554,13 @@ class Logreg(GeneralLogreg):
         best_C = 1.0
         best_acc = 0.0
         best_model = None
+        c, n, k = X.shape
         for C_val in C_vals:
             if verbose > 1:
                 print("Testing C value {}".format(C_val))
-            clf = LogisticRegression(penalty='l2', fit_intercept=self.fit_intercept_, verbose=max(verbose - 1, 0), C=C_val)
+                
+            corrected_C_val = C_val * c / (2 * n)
+            clf = LogisticRegression(penalty='l2', fit_intercept=self.fit_intercept_, verbose=max(verbose - 1, 0), C=corrected_C_val)
             clf.fit(X.cpu(), y.cpu())
             cur_acc = clf.score(val_X.cpu(), val_y.cpu())
             if verbose > 1:
@@ -654,11 +659,13 @@ class LogregTorch(GeneralLogreg):
 
                 loss += bce_loss(torch.permute(lin_comb, (1, 2, 0))[upper_mask], torch.permute(cur_y, (1, 2, 0))[upper_mask])
             
+            loss /= X_pw.shape[0]
+            
             if fit_intercept:
                 L2 = torch.sum(torch.pow(coefs[:,:,:-1][upper_mask], 2))
             else:
                 L2 = torch.sum(torch.pow(coefs[upper_mask], 2))
-            loss += L2 / 2.0 / self.base_C_
+            loss += L2 / (self.base_C_ * c)
 
             loss.backward(retain_graph=True)
             return loss
@@ -1063,7 +1070,7 @@ comb_methods = {"lda": [Lda, {"req_val": True}],
                 "neural_m2": [Neural, {"coupling_method": "m2"}],
                 "neural_bc": [Neural, {"coupling_method": "bc"}],
                 "logreg_torch": [LogregTorch, {"fit_interc": True, "req_val": True}],
-                "logreg_torch_no_interc": [LogregTorch, {"fit_interc": False, "req_val": False}]
+                "logreg_torch_no_interc": [LogregTorch, {"fit_interc": False, "req_val": True}]
                 }
 
 
