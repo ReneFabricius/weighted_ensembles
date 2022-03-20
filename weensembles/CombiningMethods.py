@@ -516,7 +516,7 @@ class Logreg(GeneralLogreg):
         if self.sweep_C_:
             coefs, best_C = self._logreg_sweep_C(val_X, val_y, val_X=X, val_y=y, verbose=verbose)
         else:
-            c, n, k = X.shape
+            n, c = val_X.shape
             corrected_C = c * self.base_C_ / (2 * n)
             clf = LogisticRegression(fit_intercept=self.fit_interc_, C=corrected_C)
             clf.fit(val_X.cpu(), val_y.cpu())
@@ -554,7 +554,7 @@ class Logreg(GeneralLogreg):
         best_C = 1.0
         best_acc = 0.0
         best_model = None
-        c, n, k = X.shape
+        n, c = val_X.shape
         for C_val in C_vals:
             if verbose > 1:
                 print("Testing C value {}".format(C_val))
@@ -632,7 +632,6 @@ class LogregTorch(GeneralLogreg):
         coefs = torch.zeros(size=(k, k, c + int(fit_intercept)), device=X.device, dtype=X.dtype, requires_grad=True)
         X.requires_grad_(False)
         y.requires_grad_(False)
-        # TODO change to mean and modify C
         bce_loss = torch.nn.BCEWithLogitsLoss(reduction="sum")
         opt = torch.optim.LBFGS(params=(coefs,), max_iter=self.max_iter_, tolerance_grad=self.tolg_,
                                 tolerance_change=self.tolch_, line_search_fn=self.line_search_)
