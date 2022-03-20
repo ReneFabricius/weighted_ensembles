@@ -423,8 +423,7 @@ class GeneralLinearCombiner(GeneralCombiner):
         X_pw[dest_mask] = X[src_mask] - X.transpose(0, 1)[src_mask]
         X_pw = torch.permute(X_pw, (3, 0, 1, 2))
         
-        return X_pw, y_pw, uppr_mask
-
+        return X_pw, y_pw.to(dtype=dtp), uppr_mask
 
 
 class Lda(GeneralLinearCombiner):
