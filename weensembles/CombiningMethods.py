@@ -464,6 +464,7 @@ class GeneralLogreg(GeneralLinearCombiner):
         self.base_C_ = base_C
 
     def _bce_loss_pw(self, X, y):
+        c, n, k = X.shape
         X_pw, y_pw, uppr_mask = self._transform_for_pairwise_fit(X, y)
         bce_loss = torch.nn.BCEWithLogitsLoss(reduction="none")
         if self.fit_interc_:
@@ -475,15 +476,15 @@ class GeneralLogreg(GeneralLinearCombiner):
             
         loss = bce_loss(torch.permute(lin_comb, (1, 2, 0))[uppr_mask], torch.permute(y_pw, (1, 2, 0))[uppr_mask])
         loss = torch.sum(loss, dim=-1)
+        loss /= X_pw.shape[0]
         
         if self.fit_interc_:    
             l2_pen = torch.sum(torch.pow(self.coefs_[:, :, :-1][uppr_mask], 2), dim=-1)
         else:
             l2_pen = torch.sum(torch.pow(self.coefs_[uppr_mask], 2), dim=-1)    
         
-        loss += l2_pen / self.base_C_ / 2
+        loss += l2_pen / (self.base_C_ * c)
         
-        c, n, k = X.shape
         tinds = torch.triu_indices(row=k, col=k, offset=1)
         pw_loss = torch.zeros(k, k, dtype=self.dtp_, device=self.dev_)
         pw_loss.index_put_(indices=(tinds[0], tinds[1]), values=loss)
