@@ -107,13 +107,17 @@ def ECE_sweep(pred, tar, p_norm=2, penultimate=False):
     :return: Estimate of calibration error.
     """
     n, k = pred.shape
-    dev = pred.device
+    dev = "cpu"
+    pred = pred.to(device="cpu")
+    tar = tar.to(device="cpu")
     if penultimate:
         pred = torch.nn.Softmax(dim=1)(pred)
     top_probs, top_inds = torch.topk(input=pred, k=1, dim=1)
     top_probs = top_probs.squeeze()
     top_inds = top_inds.squeeze()
     cor_pred = top_inds == tar
+    if torch.sum(cor_pred) == 0:
+        return None
     bins = torch.zeros(n, device=dev, dtype=torch.long)
     sample_sort_idxs = torch.argsort(top_probs)
     last_ece = None
