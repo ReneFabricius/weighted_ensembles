@@ -466,21 +466,15 @@ class GeneralLogreg(GeneralLinearCombiner):
         c, n, k = X.shape
         X_pw, y_pw, uppr_mask = self._transform_for_pairwise_fit(X, y)
         bce_loss = torch.nn.BCEWithLogitsLoss(reduction="none")
-        if self.fit_interc_:
-            Ws = self.coefs_[:, :, 0:-1]
-            Bs = self.coefs_[:, :, -1]
-            lin_comb = torch.sum(Ws * X_pw, dim=-1) + Bs
-        else:
-            lin_comb = torch.sum(self.coefs_ * X_pw, dim=-1)
+        Ws = self.coefs_[:, :, 0:-1]
+        Bs = self.coefs_[:, :, -1]
+        lin_comb = torch.sum(Ws * X_pw, dim=-1) + Bs
             
         loss = bce_loss(torch.permute(lin_comb, (1, 2, 0))[uppr_mask], torch.permute(y_pw, (1, 2, 0))[uppr_mask])
         loss = torch.sum(loss, dim=-1)
         loss /= X_pw.shape[0]
         
-        if self.fit_interc_:    
-            l2_pen = torch.sum(torch.pow(self.coefs_[:, :, :-1][uppr_mask], 2), dim=-1)
-        else:
-            l2_pen = torch.sum(torch.pow(self.coefs_[uppr_mask], 2), dim=-1)    
+        l2_pen = torch.sum(torch.pow(self.coefs_[:, :, :-1][uppr_mask], 2), dim=-1)
         
         loss += l2_pen / (self.base_C_ * c)
         
@@ -672,6 +666,10 @@ class LogregTorch(GeneralLogreg):
         opt.step(closure_loss)
         
         coefs.requires_grad_(False)
+        if not self.fit_interc_:
+            zero_interc = torch.zeros(k, k, 1, dtype=self.dtp_, device=self.dev_)
+            coefs = torch.cat([coefs, zero_interc], dim=-1)
+        
         return coefs
 
 
