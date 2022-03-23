@@ -560,7 +560,7 @@ class Logreg(GeneralLogreg):
                 print("Testing C value {}".format(C_val))
                 
             corrected_C_val = C_val * c / (2 * n)
-            clf = LogisticRegression(penalty='l2', fit_intercept=self.fit_intercept_, verbose=max(verbose - 1, 0), C=corrected_C_val)
+            clf = LogisticRegression(penalty='l2', fit_intercept=self.fit_interc_, verbose=max(verbose - 1, 0), C=corrected_C_val)
             clf.fit(X.cpu(), y.cpu())
             cur_acc = clf.score(val_X.cpu(), val_y.cpu())
             if verbose > 1:
@@ -610,7 +610,7 @@ class LogregTorch(GeneralLogreg):
         """
         return self._logreg_torch(X=val_X, y=val_y, verbose=verbose)
 
-    def _logreg_torch(self, X, y, fit_intercept=True, verbose=0, micro_batch=None):
+    def _logreg_torch(self, X, y, verbose=0, micro_batch=None):
         """Trains multiple logistic regression models using parallelism 
 
         Args:
@@ -629,7 +629,7 @@ class LogregTorch(GeneralLogreg):
             print("Starting logreg_torch fit")
         c, n, k = X.shape
         
-        coefs = torch.zeros(size=(k, k, c + int(fit_intercept)), device=X.device, dtype=X.dtype, requires_grad=True)
+        coefs = torch.zeros(size=(k, k, c + int(self.fit_interc_)), device=X.device, dtype=X.dtype, requires_grad=True)
         X.requires_grad_(False)
         y.requires_grad_(False)
         bce_loss = torch.nn.BCEWithLogitsLoss(reduction="sum")
@@ -643,7 +643,7 @@ class LogregTorch(GeneralLogreg):
                         
         def closure_loss():
             opt.zero_grad()
-            if fit_intercept:
+            if self.fit_interc_:
                 Ws = coefs[:, :, 0:-1]
                 Bs = coefs[:, :, -1]
             
@@ -651,7 +651,7 @@ class LogregTorch(GeneralLogreg):
             for mbs in range(0, X_pw.shape[0], micro_batch):
                 cur_X = X_pw[mbs : mbs + micro_batch]
                 cur_y = y_pw[mbs : mbs + micro_batch]
-                if fit_intercept:        
+                if self.fit_interc_:        
                     lin_comb = torch.sum(Ws * cur_X, dim=-1) + Bs
                 else:
                     lin_comb = torch.sum(coefs * cur_X, dim=-1)
@@ -660,7 +660,7 @@ class LogregTorch(GeneralLogreg):
             
             loss /= X_pw.shape[0]
             
-            if fit_intercept:
+            if self.fit_interc_:
                 L2 = torch.sum(torch.pow(coefs[:,:,:-1][upper_mask], 2))
             else:
                 L2 = torch.sum(torch.pow(coefs[upper_mask], 2))
