@@ -132,7 +132,7 @@ def cuda_mem_try(fun, start_bsz, device, dec_coef=0.5, max_tries=None, verbose=0
             return fun(batch_size)
         except RuntimeError as rerr:
             str_err = str(rerr)
-            if "memory" not in str_err and "CUDA" not in str_err: 
+            if "memory" not in str_err and "CUDA" not in str_err and "cuda" not in str_err: 
                 raise rerr
             if verbose > 1:
                 print("CUDA oom exception")
