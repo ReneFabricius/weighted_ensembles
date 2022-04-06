@@ -1070,6 +1070,23 @@ comb_methods = {"lda": [Lda, {"req_val": True}],
                 "logreg_torch_no_interc": [LogregTorch, {"fit_interc": False, "req_val": True}]
                 }
 
+regularization_coefficients = {
+    "logreg": {"base_C": 10 ** (1.2)},
+    "logreg_torch": {"base_C": 10 ** (1.2)},
+    "logreg.uncert": {"base_C": 10 ** (1.8)},
+    "logreg_torch.uncert": {"base_C": 10 ** (1.8)},
+    "logreg_no_interc": {"base_C": 10 ** (1.2)},
+    "logreg_torch_no_interc": {"base_C": 10 ** (1.2)},
+    "logreg_no_interc.uncert": {"base_C": 10 ** (1.6)},
+    "logreg_torch_no_interc.uncert": {"base_C": 10 ** (1.6)},
+    "grad_bc": {"base_C": 10 ** (-0.4)},
+    "grad_bc.uncert": {"base_C": 10 ** (0.0)},
+    "grad_m1": {"base_C": 10 ** (-0.2)},
+    "grad_m1.uncert": {"base_C": 10 ** (0.0)},
+    "grad_m2": {"base_C": 10 ** (-0.6)},
+    "grad_m2.uncert": {"base_C": 10 ** (0.0)}   
+}
+
 
 def arguments_dict(dict_str):
     res = {}
@@ -1116,5 +1133,10 @@ def comb_picker(co_m, c, k, device="cpu", dtype=torch.float):
     co_name = co_split[0]
     if co_name not in comb_methods:
         return None
+    
+    if co_m_name in regularization_coefficients:
+        reg_coef_name = list(regularization_coefficients[co_m_name].keys())[0]
+        if reg_coef_name not in args_dict:
+            args_dict[reg_coef_name] = regularization_coefficients[co_m_name][reg_coef_name]
     
     return comb_methods[co_name][0](c=c, k=k, device=device, dtype=dtype, name=co_m, uncert=co_split[-1] == "uncert", **comb_methods[co_name][1], **args_dict)
