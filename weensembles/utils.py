@@ -145,4 +145,47 @@ def cuda_mem_try(fun, start_bsz, device, dec_coef=0.5, max_tries=None, verbose=0
     else:
         raise RuntimeError("Unsuccessful to perform the requested action. CUDA out of memory.")
             
-            
+
+def train_test_split_equal_repr(test_size_pc, labels, shuffle=True):
+    """Splits data into training/test parts in test part, each class will have equal representation given by
+    parameter test_size_pc.
+
+    Args:
+        test_size_pc (int): Number of samples per class in test set.
+        labels (torch.Tensor): 1 dimensional tensor of class labels
+        shuffle (bool, optional): Whether to shuffle data before splitting. Defaults to True.
+        :return: (torch.Tensor, torch.Tensor) train indices, test indices.
+    """
+    
+    n = len(labels)
+    dev = labels.device
+    class_counts = torch.bincount(labels)
+    max_count = torch.max(class_counts)
+    class_num = class_counts.shape[0]
+    if shuffle:
+        weights = torch.arange(max_count, device=dev).unsqueeze(0).expand(class_num, max_count)
+        weights = (weights < class_counts.unsqueeze(1)).to(dtype=torch.float)
+        if torch.min(class_counts) < test_size_pc:
+            print("Warning: train_test_split_equal_repr: Not enough samples in each class, picking with replacement.")
+            picks = torch.multinomial(weights, test_size_pc, replacement=True)
+        else:
+            picks = torch.multinomial(weights, test_size_pc, replacement=False)
+    else:
+        if torch.min(class_counts) < test_size_pc:
+            raise ValueError("train_test_split_equal_repr: Not enough samples in each class. Try with shuffle = True - supports picking with replacement")
+        picks = torch.arange(test_size_pc, device=dev).unsqueeze(0).expand(class_num, test_size_pc).clone()
+        
+    vals, sort_perm = torch.sort(labels)
+    desort = torch.sort(sort_perm)[1]
+    cumsum = torch.cumsum(torch.nn.functional.pad(class_counts[:-1], pad=(1,0), mode="constant", value=0), dim=0)
+    picks += cumsum.unsqueeze(1)
+    picks = picks.flatten()
+    
+    pick_map = torch.zeros(n, dtype=torch.bool, device=dev)
+    pick_map[picks] = True
+    pick_map = pick_map[desort]
+    test_indices = sort_perm[picks].squeeze()
+    train_indices = torch.nonzero(pick_map != True).squeeze()
+    
+    return train_indices, test_indices
+    
