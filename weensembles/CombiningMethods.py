@@ -131,7 +131,7 @@ class GeneralLinearCombiner(GeneralCombiner):
             self.cal_models_ = []
             for cler_i in range(self.c_):
                 cal_m = TemperatureScaling(device=self.dev_, dtp=self.dtp_)
-                cal_m.fit(logit_pred=val_X[cler_i], tar=val_y, verbose=verbose)
+                cal_m.fit(logit_pred=X[cler_i], tar=y, verbose=verbose)
                 self.cal_models_.append(cal_m)
 
         if self.fit_pairwise_:
@@ -432,7 +432,7 @@ class Lda(GeneralLinearCombiner):
     def __init__(self, c, k, uncert, name, req_val, device="cpu", dtype=torch.float):
         super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=True, combine_probs=False, device=device, dtype=dtype, name=name)
         
-    def train(self, X, y, val_X, val_y, verbose=0):
+    def train(self, X, y, val_X=None, val_y=None, verbose=0):
         """Trains lda model for a pair of classes and outputs its coefficients.
 
         Args:
@@ -448,7 +448,7 @@ class Lda(GeneralLinearCombiner):
             torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
         """
         clf = LinearDiscriminantAnalysis(solver='lsqr')
-        clf.fit(val_X.cpu(), val_y.cpu())
+        clf.fit(X.cpu(), y.cpu())
         coefs = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
                            torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
         
@@ -508,12 +508,12 @@ class Logreg(GeneralLogreg):
             torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
         """
         if self.sweep_C_:
-            coefs, best_C = self._logreg_sweep_C(val_X, val_y, val_X=X, val_y=y, verbose=verbose)
+            coefs, best_C = self._logreg_sweep_C(X, y, val_X=val_X, val_y=val_y, verbose=verbose)
         else:
-            n, c = val_X.shape
+            n, c = X.shape
             corrected_C = c * self.base_C_ / (2 * n)
             clf = LogisticRegression(fit_intercept=self.fit_interc_, C=corrected_C)
-            clf.fit(val_X.cpu(), val_y.cpu())
+            clf.fit(X.cpu(), y.cpu())
             coefs = torch.cat((torch.tensor(clf.coef_, device=self.dev_, dtype=self.dtp_).squeeze(),
                             torch.tensor(clf.intercept_, device=self.dev_, dtype=self.dtp_)))
         if self.sweep_C_:
@@ -587,7 +587,7 @@ class LogregTorch(GeneralLogreg):
         else:
             self.line_search_ = None
         
-    def train(self, X, y, val_X, val_y, verbose=0):
+    def train(self, X, y, val_X=None, val_y=None, verbose=0):
         """Trains logistic regression model for a pair of classes and outputs its coefficients.
 
         Args:
@@ -602,7 +602,7 @@ class LogregTorch(GeneralLogreg):
         Returns:
             torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
         """
-        return self._logreg_torch(X=val_X, y=val_y, verbose=verbose)
+        return self._logreg_torch(X=X, y=y, verbose=verbose)
 
     def _logreg_torch(self, X, y, verbose=0, micro_batch=None):
         """Trains multiple logistic regression models using parallelism 
@@ -717,11 +717,11 @@ class Average(GeneralLinearCombiner):
             torch.tensor: Tensor of combining coefficients. Shape k × k × (c + 1), where k is number of classes and c is number of combined classifiers.
         """
         if self.calibrate_:
-            c, n, k = val_X.shape
+            c, n, k = X.shape
             coefs = torch.zeros(size=(c + 1, ), device=self.dev_, dtype=self.dtp_)
             for ci in range(c):
                 ts = TemperatureScaling(device=self.dev_, dtp=self.dtp_)
-                ts.fit(val_X[ci], val_y, verbose=verbose)
+                ts.fit(X[ci], y, verbose=verbose)
                 coefs[ci] = 1.0 / ts.temp_.item()
 
         else:
@@ -740,11 +740,11 @@ class Grad(GeneralLinearCombiner):
     """Combining method which trains its coefficient in an end-to-end manner using gradient descent.
     """
     def __init__(self, c, k, coupling_method, uncert, name, device="cpu", dtype=torch.float, base_C=1.0):
-        super().__init__(c=c, k=k, uncert=uncert, req_val=True, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype, name=name)
+        super().__init__(c=c, k=k, uncert=uncert, req_val=False, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype, name=name)
         self.coupling_m_ = coupling_method
         self.base_C_ = base_C
         
-    def train(self, X, y, val_X, val_y, verbose=0):
+    def train(self, X, y, val_X=None, val_y=None, verbose=0):
         """Computes and outputs coefficients.
 
         Args:
@@ -759,7 +759,7 @@ class Grad(GeneralLinearCombiner):
         Returns:
             torch.tensor: Computed coefficients. Tensor of shape k × k × (c + 1), where k is number of classes and c in number of combined classifiers.
         """
-        return self._grad_comb(X=val_X, y=val_y, verbose=verbose)
+        return self._grad_comb(X=X, y=y, verbose=verbose)
 
     def _grad_comb(self, X, y, verbose=0, epochs=10, lr=0.3, momentum=0.85, test_period=None, batch_sz=500):
         """Trains combining coefficients in end-to-end manner by gradient descent method.
@@ -907,7 +907,7 @@ class Neural(GeneralCombiner):
             dtype (torch.dtype, optional): Data type to use. Defaults to torch.float.
             uncert (bool, optional): Currently unused. Defaults to False.
         """
-        super().__init__(c=c, k=k, req_val=True, uncert=uncert, device=device, dtype=dtype, name=name)
+        super().__init__(c=c, k=k, req_val=False, uncert=uncert, device=device, dtype=dtype, name=name)
         self.coupling_m_ = coupling_method
         self.net_ = Net(c=c, k=k, device=device, dtype=dtype)
         
@@ -921,7 +921,7 @@ class Neural(GeneralCombiner):
         """
         self.net_ = self.net_.to(device=self.dev_)
     
-    def fit(self, val_X, val_y, batch_size=500, lr=0.01, momentum=0, epochs=10, verbose=0, test_period=None, X=None, y=None, **kwargs):
+    def fit(self, X, y, batch_size=500, lr=0.01, momentum=0, epochs=10, verbose=0, test_period=None, val_X=None, val_y=None, **kwargs):
         """Trains neural network used for inferring R matrix using end-to-end training using provided coupling method and validation data.
 
         Args:
@@ -946,7 +946,7 @@ class Neural(GeneralCombiner):
         thr_value = 1e-9
         thresh = torch.nn.Threshold(threshold=thr_value, value=thr_value)
     
-        c, n, k = val_X.shape
+        c, n, k = X.shape
         assert c == self.c_
         assert k == self.k_
         
@@ -955,8 +955,8 @@ class Neural(GeneralCombiner):
                 print("Processing epoch: {}".format(e))        
 
             perm = torch.randperm(n=n, device=self.dev_)
-            X_perm = val_X[:, perm]
-            y_perm = val_y[perm]
+            X_perm = X[:, perm]
+            y_perm = y[perm]
             for start_ind in range(0, n, batch_size):
                 optimizer.zero_grad()
                 cur_inp = X_perm[:, start_ind:(start_ind + batch_size)].to(device=self.dev_, dtype=self.dtp_)
@@ -978,13 +978,13 @@ class Neural(GeneralCombiner):
                 self.net_.eval()
                 with torch.no_grad():
                     pred = cuda_mem_try(
-                        fun=lambda bsz: self.predict_proba(X=val_X, coupling_method=self.coupling_m_, verbose=verbose - 1, batch_size=bsz),
+                        fun=lambda bsz: self.predict_proba(X=X, coupling_method=self.coupling_m_, verbose=verbose - 1, batch_size=bsz),
                         start_bsz=curn,
                         device=self.dev_,
                         verbose=verbose - 1
                     )
-                    acc = compute_acc_topk(pred=pred, tar=val_y, k=1)
-                    nll = compute_nll(pred=pred, tar=val_y)
+                    acc = compute_acc_topk(pred=pred, tar=y, k=1)
+                    nll = compute_nll(pred=pred, tar=y)
                 print("Epoch: {}, training accuracy: {}, training nll: {}".format(e, acc, nll))
                 self.net_.train()
         
@@ -1051,23 +1051,23 @@ class Neural(GeneralCombiner):
         return torch.sum(preds == y).item() / len(y)
        
        
-comb_methods = {"lda": [Lda, {"req_val": True}],
-                "logreg": [Logreg, {"fit_interc": True, "sweep_C": False, "req_val": True}],
-                "logreg_no_interc": [Logreg, {"fit_interc": False, "sweep_C": False, "req_val": True}],
+comb_methods = {"lda": [Lda, {"req_val": False}],
+                "logreg": [Logreg, {"fit_interc": True, "sweep_C": False, "req_val": False}],
+                "logreg_no_interc": [Logreg, {"fit_interc": False, "sweep_C": False, "req_val": False}],
                 "logreg_sweep_C": [Logreg, {"fit_interc": True, "sweep_C": True, "req_val": True}],
                 "logreg_no_interc_sweep_C": [Logreg, {"fit_interc": False, "sweep_C": True, "req_val": True}],
                 "average": [Average, {"calibrate": False, "combine_probs": False, "req_val": False}],
-                "cal_average": [Average, {"calibrate": True, "combine_probs": False, "req_val": True}],
+                "cal_average": [Average, {"calibrate": True, "combine_probs": False, "req_val": False}],
                 "prob_average": [Average, {"calibrate": False, "combine_probs": True, "req_val": False}],
-                "cal_prob_average": [Average, {"calibrate": True, "combine_probs": True, "req_val": True}],
+                "cal_prob_average": [Average, {"calibrate": True, "combine_probs": True, "req_val": False}],
                 "grad_m1": [Grad, {"coupling_method": "m1"}],
                 "grad_m2": [Grad, {"coupling_method": "m2"}],
                 "grad_bc": [Grad, {"coupling_method": "bc"}],
                 "neural_m1": [Neural, {"coupling_method": "m1"}],
                 "neural_m2": [Neural, {"coupling_method": "m2"}],
                 "neural_bc": [Neural, {"coupling_method": "bc"}],
-                "logreg_torch": [LogregTorch, {"fit_interc": True, "req_val": True}],
-                "logreg_torch_no_interc": [LogregTorch, {"fit_interc": False, "req_val": True}]
+                "logreg_torch": [LogregTorch, {"fit_interc": True, "req_val": False}],
+                "logreg_torch_no_interc": [LogregTorch, {"fit_interc": False, "req_val": False}]
                 }
 
 regularization_coefficients = {
