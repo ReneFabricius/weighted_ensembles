@@ -189,7 +189,7 @@ def bc(PP, verbose=0):
             cs += k - (c - oi)
     '''
     M = torch.zeros(k - 1, rws, device=device, dtype=dtype)
-    triu_inds = torch.triu_indices(k, k, offset=1)
+    triu_inds = torch.triu_indices(k, k, offset=1, device=device)
     rang = torch.arange(start=1, end=k, device=device).unsqueeze(1)
     ones = triu_inds[1].unsqueeze(0).expand(k - 1, rws)
     M[ones == rang] = 1
