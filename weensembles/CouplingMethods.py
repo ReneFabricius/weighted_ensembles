@@ -175,6 +175,7 @@ def bc(PP, verbose=0):
     rws = int(k * (k - 1) / 2)
     # Mapping h is used such that elements of {1, ..., k(k-1)/2}
     # are placed into upper triangle of k x k matrix row by row from left to right.
+    '''
     M = torch.zeros(rws, k - 1, device=device, dtype=dtype)
     for c in range(k - 1):
         rs = int((c + 1) * k - (c + 1) * (c + 2) / 2)
@@ -186,8 +187,16 @@ def bc(PP, verbose=0):
             M[cs + oi, c] = 1
             oi -= 1
             cs += k - (c - oi)
+    '''
+    M = torch.zeros(k - 1, rws, device=device, dtype=dtype)
+    triu_inds = torch.triu_indices(k, k, offset=1)
+    rang = torch.arange(start=1, end=k, device=device).unsqueeze(1)
+    ones = triu_inds[1].unsqueeze(0).expand(k - 1, rws)
+    M[ones == rang] = 1
+    min_ones = triu_inds[0].unsqueeze(0).expand(k - 1, rws)
+    M[min_ones == rang] = -1    
 
-    MMiM = torch.matmul(MMi, M.T)
+    MMiM = torch.matmul(MMi, M)
 
     if verbose > 2:
         print("Matrix MMiM:\n{}".format(MMiM.cpu().numpy()))
