@@ -602,7 +602,8 @@ class LogregTorch(GeneralLogreg):
         Returns:
             torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
         """
-        return self._logreg_torch(X=X, y=y, verbose=verbose)
+        return cuda_mem_try(fun=lambda batch_size: self._logreg_torch(X=X, y=y, verbose=verbose, micro_batch=batch_size),
+                            start_bsz=X.shape[0], device=self.dev_, dec_coef=0.8, verbose=verbose)
 
     def _logreg_torch(self, X, y, verbose=0, micro_batch=None):
         """Trains multiple logistic regression models using parallelism 
@@ -613,8 +614,7 @@ class LogregTorch(GeneralLogreg):
             fit_intercept (bool, optional): Whether to fit intercept. Defaults to True.
             verbose (int, optional): Verbosity level. Defaults to 0.
             max_iter (int, optional): Maximum number of iterations of the LBFGS optimizer. Defaults to 1000.
-            micro_batch (_type_, optional): Micro batch size. If None, no micro batching is performed. Defaults to None.
-            C (float, optional): Regularization coefficient. Defaults to 1.0.
+            micro_batch (_type_, optional): Micro batch size for gradinet accumulation. If None, no micro batching is performed. Defaults to None.
 
         Returns:
             torch.tensor: fitted coefficients. shape: k x k x c + int(fit_intercept). Only models where k1 < k2 have nonzero coefficients.
@@ -641,7 +641,7 @@ class LogregTorch(GeneralLogreg):
                 Ws = coefs[:, :, 0:-1]
                 Bs = coefs[:, :, -1]
             
-            loss = torch.tensor([0], device=X_pw.device, dtype=X_pw.dtype) 
+            loss_accum = torch.tensor([0], device=X_pw.device, dtype=X_pw.dtype) 
             for mbs in range(0, X_pw.shape[0], micro_batch):
                 cur_X = X_pw[mbs : mbs + micro_batch]
                 cur_y = y_pw[mbs : mbs + micro_batch]
@@ -650,17 +650,18 @@ class LogregTorch(GeneralLogreg):
                 else:
                     lin_comb = torch.sum(coefs * cur_X, dim=-1)
 
-                loss += bce_loss(torch.permute(lin_comb, (1, 2, 0))[upper_mask], torch.permute(cur_y, (1, 2, 0))[upper_mask])
+                loss = bce_loss(torch.permute(lin_comb, (1, 2, 0))[upper_mask], torch.permute(cur_y, (1, 2, 0))[upper_mask])
+                loss /= X_pw.shape[0]
             
-            loss /= X_pw.shape[0]
-            
-            if self.fit_interc_:
-                L2 = torch.sum(torch.pow(coefs[:,:,:-1][upper_mask], 2))
-            else:
-                L2 = torch.sum(torch.pow(coefs[upper_mask], 2))
-            loss += L2 / (self.base_C_ * c)
+                if self.fit_interc_:
+                    L2 = torch.sum(torch.pow(coefs[:,:,:-1][upper_mask], 2))
+                else:
+                    L2 = torch.sum(torch.pow(coefs[upper_mask], 2))
+                loss += L2 / (self.base_C_ * c)
 
-            loss.backward(retain_graph=True)
+                loss.backward(retain_graph=False)
+                loss_accum += loss
+                
             return loss
             
         opt.step(closure_loss)
