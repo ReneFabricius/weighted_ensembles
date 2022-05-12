@@ -492,7 +492,7 @@ class Logreg(GeneralLogreg):
         super().__init__(c=c, k=k, fit_interc=fit_interc, uncert=uncert, req_val=req_val, fit_pairwise=True, device=device, dtype=dtype, base_C=base_C, name=name)
         self.sweep_C_ = sweep_C
         
-    def train(self, X, y, val_X, val_y, verbose=0):
+    def train(self, X, y, val_X=None, val_y=None, verbose=0):
         """Trains logistic regression model for a pair of classes and outputs its coefficients.
 
         Args:
