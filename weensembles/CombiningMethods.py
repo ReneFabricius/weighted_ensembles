@@ -602,8 +602,11 @@ class LogregTorch(GeneralLogreg):
         Returns:
             torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
         """
+        n, c = X.shape
+        # Expects equal number of samples for each class
+        per_class = n // self.k_
         return cuda_mem_try(fun=lambda batch_size: self._logreg_torch(X=X, y=y, verbose=verbose, micro_batch=batch_size),
-                            start_bsz=X.shape[0], device=self.dev_, dec_coef=0.8, verbose=verbose)
+                            start_bsz=2 * per_class, device=self.dev_, dec_coef=0.8, verbose=verbose)
 
     def _logreg_torch(self, X, y, verbose=0, micro_batch=None):
         """Trains multiple logistic regression models using parallelism 
@@ -641,6 +644,12 @@ class LogregTorch(GeneralLogreg):
                 Ws = coefs[:, :, 0:-1]
                 Bs = coefs[:, :, -1]
             
+            if self.fit_interc_:
+                L2 = torch.sum(torch.pow(coefs[:,:,:-1][upper_mask], 2))
+            else:
+                L2 = torch.sum(torch.pow(coefs[upper_mask], 2))
+            L2 /= (self.base_C_ * c)
+
             loss_accum = torch.tensor([0], device=X_pw.device, dtype=X_pw.dtype) 
             for mbs in range(0, X_pw.shape[0], micro_batch):
                 cur_X = X_pw[mbs : mbs + micro_batch]
@@ -652,17 +661,12 @@ class LogregTorch(GeneralLogreg):
 
                 loss = bce_loss(torch.permute(lin_comb, (1, 2, 0))[upper_mask], torch.permute(cur_y, (1, 2, 0))[upper_mask])
                 loss /= X_pw.shape[0]
-            
-                if self.fit_interc_:
-                    L2 = torch.sum(torch.pow(coefs[:,:,:-1][upper_mask], 2))
-                else:
-                    L2 = torch.sum(torch.pow(coefs[upper_mask], 2))
-                loss += L2 / (self.base_C_ * c)
-
+                loss += L2 * (cur_X.shape[0] / X_pw.shape[0])            
+                
                 loss.backward(retain_graph=False)
                 loss_accum += loss
                 
-            return loss
+            return loss_accum
             
         opt.step(closure_loss)
         
