@@ -645,12 +645,6 @@ class LogregTorch(GeneralLogreg):
                 Ws = coefs[:, :, 0:-1]
                 Bs = coefs[:, :, -1]
             
-            if self.fit_interc_:
-                L2 = torch.sum(torch.pow(coefs[:,:,:-1][upper_mask], 2))
-            else:
-                L2 = torch.sum(torch.pow(coefs[upper_mask], 2))
-            L2 /= (self.base_C_ * c)
-
             loss_accum = torch.tensor([0], device=X_pw.device, dtype=X_pw.dtype) 
             for mbs in range(0, X_pw.shape[0], micro_batch):
                 cur_X = X_pw[mbs : mbs + micro_batch]
@@ -659,6 +653,13 @@ class LogregTorch(GeneralLogreg):
                     lin_comb = torch.sum(Ws * cur_X, dim=-1) + Bs
                 else:
                     lin_comb = torch.sum(coefs * cur_X, dim=-1)
+                
+                # Needs to compute L2 every time, because computation graph is lost during backward call (or have to retain it and waste memory).
+                if self.fit_interc_:
+                    L2 = torch.sum(torch.pow(coefs[:,:,:-1][upper_mask], 2))
+                else:
+                    L2 = torch.sum(torch.pow(coefs[upper_mask], 2))
+                L2 /= (self.base_C_ * c)
 
                 loss = bce_loss(torch.permute(lin_comb, (1, 2, 0))[upper_mask], torch.permute(cur_y, (1, 2, 0))[upper_mask])
                 loss /= X_pw.shape[0]
