@@ -591,7 +591,7 @@ class LogregTorch(GeneralLogreg):
         """Trains logistic regression model for a pair of classes and outputs its coefficients.
 
         Args:
-            X (torch.tensor): Tensor of training predictors. Shape n × c × k, where n is number of training samples,
+            X (torch.tensor): Tensor of training predictors. Shape c × n × k, where n is number of training samples,
             c is the number of combined classifiers and k is the number of classes.
             y (torch.tensor): Tensor of training labels. Shape n - number of training samples.
             val_X (torch.tensor, optional): Tensor of validation predictors. Shape n × c, 
@@ -603,7 +603,7 @@ class LogregTorch(GeneralLogreg):
         Returns:
             torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
         """
-        n, c, k = X.shape
+        c, n, k = X.shape
         # Expects equal number of samples for each class
         per_class = n // k
         return cuda_mem_try(fun=lambda batch_size: self._logreg_torch(X=X, y=y, verbose=verbose, micro_batch=batch_size),
