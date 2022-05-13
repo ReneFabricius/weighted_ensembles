@@ -840,17 +840,15 @@ class Grad(GeneralLinearCombiner):
                             pred = thresh(self.predict_proba(X=X_mb, l=k, coupling_method=self.coupling_m_,
                                                                 verbose=max(verbose - 2, 0), batch_size=mbatch_sz, coefs=coefs))
                             loss = nll_loss(torch.log(pred), y_mb) * (len(y_mb) / len(y_batch))
-                            L2 = torch.sum(torch.pow(coefs[:,:,:-1], 2)) / (k * (k - 1) * c)
-                            loss = loss + L2 / self.base_C_
-                            if verbose > 1:
-                                print("Loss: {}".format(loss))
                             loss.backward()
                         
+                        L2 = torch.sum(torch.pow(coefs[:,:,:-1], 2)) / (k * (k - 1) * c) / self.base_C_
+                        L2.backward()
                         opt.step()
                         finished = True
 
                     except RuntimeError as rerr:
-                        if 'memory' not in str(rerr) and "CUDA" not in str(rerr):
+                        if 'memory' not in str(rerr) and "CUDA" not in str(rerr) and "cuda" not in str(rerr):
                             raise rerr
                         if verbose > 1:
                             print("OOM Exception")
