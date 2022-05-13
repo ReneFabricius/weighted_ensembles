@@ -654,20 +654,20 @@ class LogregTorch(GeneralLogreg):
                 else:
                     lin_comb = torch.sum(coefs * cur_X, dim=-1)
                 
-                # Needs to compute L2 every time, because computation graph is lost during backward call (or have to retain it and waste memory).
-                if self.fit_interc_:
-                    L2 = torch.sum(torch.pow(coefs[:,:,:-1][upper_mask], 2))
-                else:
-                    L2 = torch.sum(torch.pow(coefs[upper_mask], 2))
-                L2 /= (self.base_C_ * c)
-
                 loss = bce_loss(torch.permute(lin_comb, (1, 2, 0))[upper_mask], torch.permute(cur_y, (1, 2, 0))[upper_mask])
                 loss /= X_pw.shape[0]
-                loss += L2 * (cur_X.shape[0] / X_pw.shape[0])            
                 
                 loss.backward(retain_graph=False)
                 loss_accum += loss
-                
+
+            if self.fit_interc_:
+                L2 = torch.sum(torch.pow(coefs[:,:,:-1][upper_mask], 2))
+            else:
+                L2 = torch.sum(torch.pow(coefs[upper_mask], 2))
+            L2 /= (self.base_C_ * c)
+            L2.backward(retain_graph=False)
+            loss_accum += L2
+
             return loss_accum
             
         opt.step(closure_loss)
