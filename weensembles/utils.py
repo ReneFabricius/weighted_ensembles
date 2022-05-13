@@ -189,3 +189,20 @@ def train_test_split_equal_repr(test_size_pc, labels, shuffle=True):
     
     return train_indices, test_indices
     
+    
+def print_memory_statistics(list_tensors=False):
+    allocated = torch.cuda.memory_allocated()
+    max_allocated = torch.cuda.max_memory_allocated()
+    reserved = torch.cuda.memory_reserved()
+    max_reserved = torch.cuda.max_memory_reserved()
+
+    print("Allocated current: {:.3f}GB, max {:.3f}GB".format(allocated / 2 ** 30, max_allocated / 2 ** 30))
+    print("Reserved current: {:.3f}GB, max {:.3f}GB".format(reserved / 2 ** 30, max_reserved / 2 ** 30))
+
+    if list_tensors:
+        for obj in gc.get_objects():
+            try:
+                if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                    print(type(obj), obj.size(), obj.device)
+            except:
+                pass

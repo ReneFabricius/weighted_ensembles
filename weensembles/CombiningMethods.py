@@ -366,7 +366,7 @@ class GeneralLinearCombiner(GeneralCombiner):
         preds = torch.argmax(prob, dim=1)
         return torch.sum(preds == y).item() / len(y)
     
-    def _transform_for_pairwise_fit(self, X, y):
+    def _transform_for_pairwise_fit(self, X, y, batch_size=None):
         """
         Transforms data into format for feeding into pairwise models. Each class must have the same number of samples.
         Resulting features are organized in a class by class manner, this is represented by dimensions k x k.
@@ -376,6 +376,7 @@ class GeneralLinearCombiner(GeneralCombiner):
         Args:
             X (torch.tensor): Input features. Shape c x n x k
             y (torch.tensor): Input labels. Shape n.
+            batch_size (int): Batch size for batched processing. Maximal value is number of samples per class and minimal value is 1.
 
         Returns:
             torch.tensor, torch.tensor, torch.tensor: Returns three tensors.
@@ -388,40 +389,60 @@ class GeneralLinearCombiner(GeneralCombiner):
         dev = X.device
         dtp = X.dtype
         
+        if batch_size is None:
+            batch_size = n // k
+        
         # Create boolean mask with upper triangle indices True
         tinds = torch.triu_indices(row=k, col=k, offset=1)
         uppr_mask = torch.zeros(k, k, dtype=torch.bool, device=dev)
         uppr_mask.index_put_(indices=(tinds[0], tinds[1]), values=torch.tensor([True], dtype=torch.bool, device=dev))
-        
-        y = y.unsqueeze(1).unsqueeze(2).expand(n, k, k)
-        cl = torch.tensor(range(k), device=dev).unsqueeze(1).expand(k, k)
         non_diag = torch.eye(k, k, device=dev) != 1
-        # src_mask has shape n x k x k. src_mask[i, k1, k2] contains True if sample i belongs to class k1 or k2.
-        src_mask = ((y == cl) + (y == cl.t())) * non_diag
-        # Lower indices move slower in the masked select. Permute src_mask dimensions, so the picked elements are ordered by first and second class.
-        src_mask = torch.permute(src_mask, (1, 2, 0))
+        X_pws = []
+        y_pws = []
 
-        dest_mask = torch.permute(non_diag.unsqueeze(0).expand(2 * nk, k, k), (1, 2, 0))
-        # dest_mask contains true everywhere except on the main diagonal of a k x k matrix.    
+        labels = torch.arange(k, device=dev, dtype=y.dtype).unsqueeze(1)
+        class_indices = torch.nonzero(labels == y, as_tuple=True)[1].reshape(k, -1)
+        for bs in range(0, class_indices.shape[1], batch_size):
+            batch_inds = torch.flatten(class_indices[:, bs:(bs + batch_size)])
+            batch_n = batch_inds.shape[0]
+            batch_nk = batch_n // k
+            batch_y = y[batch_inds]
+            batch_X = X[:, batch_inds]
+        
+            batch_y = batch_y.unsqueeze(1).unsqueeze(2).expand(batch_n, k, k)
+            cl = torch.tensor(range(k), device=dev).unsqueeze(1).expand(k, k)
+            # src_mask has shape n x k x k. src_mask[i, k1, k2] contains True if sample i belongs to class k1 or k2.
+            src_mask = ((batch_y == cl) + (batch_y == cl.t())) * non_diag
+            # Lower indices move slower in the masked select. Permute src_mask dimensions, so the picked elements are ordered by first and second class.
+            src_mask = torch.permute(src_mask, (1, 2, 0))
+
+            dest_mask = torch.permute(non_diag.unsqueeze(0).expand(2 * batch_nk, k, k), (1, 2, 0))
+            # dest_mask contains true everywhere except on the main diagonal of a k x k matrix.    
+                
+            tars_src = torch.zeros(batch_n, k, k, device=dev)
+            # Class given by row index has label 1. 
+            tars_src[(batch_y == cl) * non_diag] = 1.0
+            # Permute dimensions, so the masked select is ordered first by class dimensions.
+            tars_src = torch.permute(tars_src, (1, 2, 0))
+            y_pw = torch.zeros(k, k, 2 * batch_nk, device=dev)
+            y_pw[dest_mask] = tars_src[src_mask]
+            y_pw = torch.permute(y_pw, (2, 0, 1))
+
+            # Expand by second class index
+            batch_X = torch.permute(batch_X.unsqueeze(3).expand(c, batch_n, k, k), (2, 3, 0, 1))
+            X_pw = torch.zeros(k, k, c, 2 * batch_nk, device=dev, dtype=dtp)
+            # Expand by feature dimension (c)
+            src_mask = src_mask.unsqueeze(2).expand(k, k, c, batch_n)
+            dest_mask = dest_mask.unsqueeze(2).expand(k, k, c, 2 * batch_nk)
+            # Compute difference: first(row) class logit - second(column) class logit.
+            X_pw[dest_mask] = batch_X[src_mask] - batch_X.transpose(0, 1)[src_mask]
+            X_pw = torch.permute(X_pw, (3, 0, 1, 2))
             
-        tars_src = torch.zeros(n, k, k, device=dev)
-        # Class given by row index has label 1. 
-        tars_src[(y == cl) * non_diag] = 1.0
-        # Permute dimensions, so the masked select is ordered first by class dimensions.
-        tars_src = torch.permute(tars_src, (1, 2, 0))
-        y_pw = torch.zeros(k, k, 2 * nk, device=dev)
-        y_pw[dest_mask] = tars_src[src_mask]
-        y_pw = torch.permute(y_pw, (2, 0, 1))
-
-        # Expand by second class index
-        X = torch.permute(X.unsqueeze(3).expand(c, n, k, k), (2, 3, 0, 1))
-        X_pw = torch.zeros(k, k, c, 2 * nk, device=dev, dtype=dtp)
-        # Expand by feature dimension (c)
-        src_mask = src_mask.unsqueeze(2).expand(k, k, c, n)
-        dest_mask = dest_mask.unsqueeze(2).expand(k, k, c, 2 * nk)
-        # Compute difference: first(row) class logit - second(column) class logit.
-        X_pw[dest_mask] = X[src_mask] - X.transpose(0, 1)[src_mask]
-        X_pw = torch.permute(X_pw, (3, 0, 1, 2))
+            X_pws.append(X_pw)
+            y_pws.append(y_pw)
+        
+        X_pw = torch.cat(X_pws, dim=0)
+        y_pw = torch.cat(y_pws, dim=0)
         
         return X_pw, y_pw.to(dtype=dtp), uppr_mask
 
@@ -606,10 +627,23 @@ class LogregTorch(GeneralLogreg):
         c, n, k = X.shape
         # Expects equal number of samples for each class
         per_class = n // k
-        return cuda_mem_try(fun=lambda batch_size: self._logreg_torch(X=X, y=y, verbose=verbose, micro_batch=batch_size),
+        try:
+            X_pw, y_pw, upper_mask = cuda_mem_try(fun=lambda batch_size: self._transform_for_pairwise_fit(X, y, batch_size=batch_size),
+                                                  start_bsz=per_class, device=self.dev_, dec_coef=0.8, verbose=verbose)
+        except RuntimeError as rerr:
+            if str(rerr) != "Unsuccessful to perform the requested action. CUDA out of memory." or X.device == "cpu":
+                raise rerr
+            X_pw, y_pw, upper_mask = cuda_mem_try(fun=lambda batch_size: self._transform_for_pairwise_fit(X.cpu(), y.cpu(), batch_size=batch_size),
+                                                  start_bsz=per_class, device=self.dev_, dec_coef=0.8, verbose=verbose)
+            X_pw = X_pw.to(device=self.dev_)
+            y_pw = y_pw.to(device=self.dev_)
+            upper_mask = upper_mask.to(device=self.dev_)
+
+        return cuda_mem_try(fun=lambda batch_size: self._logreg_torch(X_pw=X_pw, y_pw=y_pw, upper_mask=upper_mask,
+                                                                      c=c, n=n, k=k, verbose=verbose, micro_batch=batch_size),
                             start_bsz=2 * per_class, device=self.dev_, dec_coef=0.8, verbose=verbose)
 
-    def _logreg_torch(self, X, y, verbose=0, micro_batch=None):
+    def _logreg_torch(self, X_pw, y_pw, upper_mask, c, n, k, verbose=0, micro_batch=None):
         """Trains multiple logistic regression models using parallelism 
 
         Args:
@@ -625,16 +659,14 @@ class LogregTorch(GeneralLogreg):
         """
         if verbose > 0:
             print("Starting logreg_torch fit")
-        c, n, k = X.shape
+        grad_accumulating = micro_batch is not None and micro_batch < (n // k * 2)
         
-        coefs = torch.zeros(size=(k, k, c + int(self.fit_interc_)), device=X.device, dtype=X.dtype, requires_grad=True)
-        X.requires_grad_(False)
-        y.requires_grad_(False)
+        coefs = torch.zeros(size=(k, k, c + int(self.fit_interc_)), device=self.dev_, dtype=self.dtp_, requires_grad=True)
+        X_pw.requires_grad_(False)
+        y_pw.requires_grad_(False)
         bce_loss = torch.nn.BCEWithLogitsLoss(reduction="sum")
         opt = torch.optim.LBFGS(params=(coefs,), max_iter=self.max_iter_, tolerance_grad=self.tolg_,
                                 tolerance_change=self.tolch_, line_search_fn=self.line_search_)
-
-        X_pw, y_pw, upper_mask = self._transform_for_pairwise_fit(X, y)
         
         if micro_batch is None:
             micro_batch = X_pw.shape[0]
@@ -649,6 +681,7 @@ class LogregTorch(GeneralLogreg):
             for mbs in range(0, X_pw.shape[0], micro_batch):
                 cur_X = X_pw[mbs : mbs + micro_batch]
                 cur_y = y_pw[mbs : mbs + micro_batch]
+                
                 if self.fit_interc_:        
                     lin_comb = torch.sum(Ws * cur_X, dim=-1) + Bs
                 else:
