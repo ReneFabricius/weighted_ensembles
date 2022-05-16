@@ -403,40 +403,15 @@ class GeneralLinearCombiner(GeneralCombiner):
         labels = torch.arange(k, device=dev, dtype=y.dtype).unsqueeze(1)
         class_indices = torch.nonzero(labels == y, as_tuple=True)[1].reshape(k, -1)
         for bs in range(0, class_indices.shape[1], batch_size):
-            batch_inds = torch.flatten(class_indices[:, bs:(bs + batch_size)])
-            batch_n = batch_inds.shape[0]
-            batch_nk = batch_n // k
-            batch_y = y[batch_inds]
-            batch_X = X[:, batch_inds]
-        
-            batch_y = batch_y.unsqueeze(1).unsqueeze(2).expand(batch_n, k, k)
-            cl = torch.tensor(range(k), device=dev).unsqueeze(1).expand(k, k)
-            # src_mask has shape n x k x k. src_mask[i, k1, k2] contains True if sample i belongs to class k1 or k2.
-            src_mask = ((batch_y == cl) + (batch_y == cl.t())) * non_diag
-            # Lower indices move slower in the masked select. Permute src_mask dimensions, so the picked elements are ordered by first and second class.
-            src_mask = torch.permute(src_mask, (1, 2, 0))
-
-            dest_mask = torch.permute(non_diag.unsqueeze(0).expand(2 * batch_nk, k, k), (1, 2, 0))
-            # dest_mask contains true everywhere except on the main diagonal of a k x k matrix.    
-                
-            tars_src = torch.zeros(batch_n, k, k, device=dev)
-            # Class given by row index has label 1. 
-            tars_src[(batch_y == cl) * non_diag] = 1.0
-            # Permute dimensions, so the masked select is ordered first by class dimensions.
-            tars_src = torch.permute(tars_src, (1, 2, 0))
-            y_pw = torch.zeros(k, k, 2 * batch_nk, device=dev)
-            y_pw[dest_mask] = tars_src[src_mask]
-            y_pw = torch.permute(y_pw, (2, 0, 1))
-
-            # Expand by second class index
-            batch_X = torch.permute(batch_X.unsqueeze(3).expand(c, batch_n, k, k), (2, 3, 0, 1))
-            X_pw = torch.zeros(k, k, c, 2 * batch_nk, device=dev, dtype=dtp)
-            # Expand by feature dimension (c)
-            src_mask = src_mask.unsqueeze(2).expand(k, k, c, batch_n)
-            dest_mask = dest_mask.unsqueeze(2).expand(k, k, c, 2 * batch_nk)
-            # Compute difference: first(row) class logit - second(column) class logit.
-            X_pw[dest_mask] = batch_X[src_mask] - batch_X.transpose(0, 1)[src_mask]
-            X_pw = torch.permute(X_pw, (3, 0, 1, 2))
+            batch_inds = class_indices[:, bs:(bs + batch_size)]
+            batch_nk = batch_inds.shape[1] 
+            pw_inds = batch_inds.unsqueeze(1).expand(k, k, batch_nk) 
+            pw_inds = torch.cat([pw_inds, pw_inds.transpose(0, 1)], dim=2)
+            row_class = torch.arange(start=0, end=k, device=dev, dtype=torch.long).reshape(k, 1, 1).expand(k, k, 2 * batch_nk)
+            col_class = row_class.transpose(0, 1)
+            X_pw = X[:, pw_inds, row_class] - X[:, pw_inds, col_class]
+            X_pw = torch.permute(X_pw, (3, 1, 2, 0))
+            y_pw = torch.cat([torch.ones((batch_nk, k, k), device=dev), torch.zeros((batch_nk, k, k), device=dev)], dim=0)
             
             X_pws.append(X_pw)
             y_pws.append(y_pw)
