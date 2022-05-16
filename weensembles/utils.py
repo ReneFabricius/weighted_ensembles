@@ -93,7 +93,7 @@ def pairwise_accuracies(SS, tar):
     :param tar: correct labels, 0 for class on index 1 and 1 for class on index 0
     :return: accuracies of classifiers
     """
-    c, n, k = SS.size()
+    n = SS.shape[1]
     top_v, top_i = torch.topk(SS, 1, dim=2)
     ti = top_i.squeeze(dim=2)
     # Coding of target is switched. 1 for class on index 0 and 0 for class on index 1

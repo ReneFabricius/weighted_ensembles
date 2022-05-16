@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from weensembles.CalibrationMethod import CalibrationMethod, TemperatureScaling
 from weensembles.CouplingMethods import coup_picker
 from weensembles.predictions_evaluation import compute_acc_topk, compute_nll, compute_pairwise_accuracies
-from weensembles.utils import cuda_mem_try, pairwise_accuracies
+from weensembles.utils import cuda_mem_try, pairwise_accuracies, pairwise_accuracies_penultimate
 
 
 class GeneralCombiner(ABC):
@@ -188,8 +188,8 @@ class GeneralLinearCombiner(GeneralCombiner):
                     self.coefs_[fc, sc, :] = pw_coefs
                     self.coefs_[sc, fc, :] = pw_coefs
 
-                    if verbose > 1:
-                        pwacc = pairwise_accuracies(SS, pw_y)
+                    if verbose > 5:
+                        pwacc = pairwise_accuracies_penultimate(SS, pw_y)
                         print("Training pairwise accuracies for classes: " + str(fc) + ", " + str(sc) +
                                 "\n\tpairwise accuracies: " + str(pwacc) +
                                 "\n\tchosen coefficients: " + str(pw_coefs[:, 0:-1]) +
