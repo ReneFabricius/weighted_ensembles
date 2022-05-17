@@ -572,12 +572,14 @@ class Logreg(GeneralLogreg):
 class LogregTorch(GeneralLogreg):
     """Combining method which uses logistic regression implemented in pytorch to infer combining coefficients.
     """
-    def __init__(self, c, k, fit_interc, name, req_val, uncert, device="cpu", dtype=torch.float, base_C=1.0, max_iter=15000, tolg=1e-5, tolch=1e-9, line_search=False):
+    def __init__(self, c, k, fit_interc, name, req_val, uncert, device="cpu", dtype=torch.float, base_C=1.0, max_iter=15000, tolg=1e-5, tolch=1e-9,
+                 learning_rate=0.1, line_search=False):
         super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=False, fit_interc=fit_interc,
                          base_C=base_C, device=device, dtype=dtype, name=name)
         self.max_iter_ = int(max_iter)
         self.tolg_ = tolg
         self.tolch_ = tolch
+        self.learning_rate_ = learning_rate
         if line_search:
             self.line_search_ = 'strong_wolfe'
         else:
@@ -622,8 +624,9 @@ class LogregTorch(GeneralLogreg):
         """Trains multiple logistic regression models using parallelism 
 
         Args:
-            X (torch.tensor): Tensor of training predictors. Shape c × n × k. Where c is number of combined classifiers, n is number of training samples and k is number of classes.
-            y (torch.tensor): Tensor of training labels. Shape n - number of training samples.
+            X_pw (torch.tensor): Tensor of training predictors. Shape 2*nk × k × k × c Where c is number of combined classifiers, 
+            nk is number of training samples per class and k is number of classes.
+            y_pw (torch.tensor): Tensor of training labels. Shape 2*nk × k × k, where nk is number of training samples per class and k is number of classes.
             fit_intercept (bool, optional): Whether to fit intercept. Defaults to True.
             verbose (int, optional): Verbosity level. Defaults to 0.
             max_iter (int, optional): Maximum number of iterations of the LBFGS optimizer. Defaults to 1000.
@@ -641,12 +644,14 @@ class LogregTorch(GeneralLogreg):
         y_pw.requires_grad_(False)
         bce_loss = torch.nn.BCEWithLogitsLoss(reduction="sum")
         opt = torch.optim.LBFGS(params=(coefs,), max_iter=self.max_iter_, tolerance_grad=self.tolg_,
-                                tolerance_change=self.tolch_, line_search_fn=self.line_search_)
+                                tolerance_change=self.tolch_, line_search_fn=self.line_search_,
+                                lr=self.learning_rate_)
         
         if micro_batch is None:
             micro_batch = X_pw.shape[0]
                         
         def closure_loss():
+            print("Nans: {}".format(torch.sum(torch.isnan(coefs))))
             opt.zero_grad()
             if self.fit_interc_:
                 Ws = coefs[:, :, 0:-1]
