@@ -651,7 +651,6 @@ class LogregTorch(GeneralLogreg):
             micro_batch = X_pw.shape[0]
                         
         def closure_loss():
-            print("Nans: {}".format(torch.sum(torch.isnan(coefs))))
             opt.zero_grad()
             if self.fit_interc_:
                 Ws = coefs[:, :, 0:-1]
