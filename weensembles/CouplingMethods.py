@@ -16,9 +16,9 @@ def m1(PP, verbose=0):
     n, k, kk = PP.size()
     assert k == kk
     PP = PP * (1 - torch.eye(k, k, device=device))
-    if verbose > 1:
+    if verbose > 2:
         print("Working with {} samples, each with {} classes".format(n, k))
-        if verbose > 2:
+        if verbose > 3:
             print("Solving for pairwise probabilities\n{}".format(PP.cpu().numpy()))
 
     E = torch.eye(k, device=device, dtype=dtype)
@@ -29,7 +29,7 @@ def m1(PP, verbose=0):
     A = (PP.sum(dim=2).diag_embed() + PP) / (k - 1) - Es
     A[:, k - 1, :] = 1
 
-    if verbose > 2:
+    if verbose > 3:
         print("Solving linear system\n{}\n× x =\n{}".format(A.cpu().numpy(), B.cpu().numpy()))
 
     Xs = torch.linalg.solve(A, B)
@@ -73,17 +73,17 @@ def m2(PP, verbose=0):
     A = torch.cat((Q, es), 2)
     A = torch.cat((A, torch.cat((es.transpose(1, 2), zs), 2)), 1)
 
-    if verbose > 2:
+    if verbose > 3:
         print("Solving linear system\n{}\n× x =\n{}".format(A.cpu().numpy(), B.cpu().numpy()))
 
     Xs = torch.linalg.solve(A, B)
     ps = Xs[:, 0:k, 0:1].squeeze(2)
 
-    if verbose > 2:
+    if verbose > 3:
         print("Resulting probabilities\n{}".format(ps.cpu().numpy()))
 
     end = timer()
-    if verbose > 0:
+    if verbose > 2:
         print("Method m2 finished in {:.4f} s".format(end - start))
 
     return ps
@@ -119,7 +119,7 @@ def m2_iter(PP, verbose=0):
 
     Q = (PP * PP).sum(dim=1).diag_embed() - PP * PP.transpose(1, 2)
 
-    if verbose > 2:
+    if verbose > 3:
         print("Matrix Q:\n{}".format(Q.cpu().numpy()))
 
     p = torch.ones(n, k, 1, device=device, dtype=dtype) / k
@@ -130,14 +130,14 @@ def m2_iter(PP, verbose=0):
 
         max_err = torch.max(torch.abs(Qp - pQp)).item()
 
-        if verbose > 2:
+        if verbose > 3:
             print("Iteration {}".format(it))
             print("Probability vector:\n{}".format(p.cpu().numpy()))
             print("Qp:\n{}\npQp: {}".format(Qp.cpu().numpy(), pQp.cpu().numpy()))
             print("Maximum error: {}".format(max_err))
 
         if max_err < eps:
-            if verbose > 1:
+            if verbose > 2:
                 print("Exiting in iteration {}".format(it))
             break
 
@@ -149,7 +149,7 @@ def m2_iter(PP, verbose=0):
             p = p / (1 + diff)
 
     end = timer()
-    if verbose > 0:
+    if verbose > 2:
         print("Method m2_iter finished in {:.4f} s".format(end - start))
 
     return p.squeeze(2)
@@ -175,19 +175,7 @@ def bc(PP, verbose=0):
     rws = int(k * (k - 1) / 2)
     # Mapping h is used such that elements of {1, ..., k(k-1)/2}
     # are placed into upper triangle of k x k matrix row by row from left to right.
-    '''
-    M = torch.zeros(rws, k - 1, device=device, dtype=dtype)
-    for c in range(k - 1):
-        rs = int((c + 1) * k - (c + 1) * (c + 2) / 2)
-        re = int((c + 2) * k - (c + 2) * (c + 3) / 2)
-        M[rs:re, c] = -1
-        oi = c
-        cs = 0
-        while oi >= 0:
-            M[cs + oi, c] = 1
-            oi -= 1
-            cs += k - (c - oi)
-    '''
+    
     M = torch.zeros(k - 1, rws, device=device, dtype=dtype)
     triu_inds = torch.triu_indices(k, k, offset=1, device=device)
     rang = torch.arange(start=1, end=k, device=device).unsqueeze(1)
@@ -198,7 +186,7 @@ def bc(PP, verbose=0):
 
     MMiM = torch.matmul(MMi, M)
 
-    if verbose > 2:
+    if verbose > 3:
         print("Matrix MMiM:\n{}".format(MMiM.cpu().numpy()))
 
     rv = PP[:, torch.triu(torch.ones(k, k, device=device, dtype=dtype), 1) == 1].T
@@ -208,7 +196,7 @@ def bc(PP, verbose=0):
     s = torch.log(1 / rv - 1)
     u = torch.matmul(MMiM, s)
 
-    if verbose > 2:
+    if verbose > 3:
         print("Vector s:\n{}\nVector u:\n{}".format(s.cpu().numpy(), u.cpu().numpy()))
 
     zs = torch.zeros(1, n, device=device, dtype=dtype)
@@ -216,7 +204,7 @@ def bc(PP, verbose=0):
     ps = u_exp / torch.sum(u_exp, dim=0)
 
     end = timer()
-    if verbose > 0:    
+    if verbose > 2:    
         print("Method bc finished in {:.4f} s".format(end - start))
 
     return ps.T
@@ -238,9 +226,9 @@ def sbt(PP, verbose=0):
     n, k, kk = PP.shape
     assert(k == kk)
     PP = PP * (1 - torch.eye(k, k, device=dev))
-    if verbose > 1:
+    if verbose > 2:
         print("Working with {} samples, each with {} classes".format(n, k))
-        if verbose > 2:
+        if verbose > 3:
             print("Solving for pairwise probabilities\n{}".format(PP.cpu().numpy()))
 
     ey = torch.eye(k, dtype=dtp, device=dev)
@@ -251,17 +239,17 @@ def sbt(PP, verbose=0):
     P[:, k - 1, :] = 1
     B = torch.zeros(n, k, 1, dtype=dtp, device=dev)
     B[:, k - 1, :] = 1
-    if verbose > 2:
+    if verbose > 3:
         print("Solving linear system\n{}\n× x =\n{}".format(P.cpu().numpy(), B.cpu().numpy()))
 
     X = torch.linalg.lstsq(P, B).solution
     
     end = timer()
-    if verbose > 2:
+    if verbose > 3:
         print("Resulting probabilities\n{}".format(X.squeeze(2).cpu().numpy()))
 
     end = timer()
-    if verbose > 0:
+    if verbose > 2:
         print("Method sbt finished in {:.4f} s".format(end - start))
 
     return X.squeeze(2)
