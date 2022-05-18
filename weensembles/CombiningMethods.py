@@ -123,6 +123,8 @@ class GeneralLinearCombiner(GeneralCombiner):
             val_y (torch.tensor): Validation set targets. Required if combining_method.req_val is True. 
         """
 
+        if verbose > 0:
+            print("Starting fit with comb method {}".format(self.name_))
         start = timer()
         num = self.k_ * (self.k_ - 1) // 2      # Number of pairs of classes
         print_step = num // 100
@@ -228,7 +230,7 @@ class GeneralLinearCombiner(GeneralCombiner):
         :return: n x k tensor of combined posteriors
         """
         if verbose > 0:
-            print("Starting predict proba of {}".format(self.name_))
+            print("Starting predict proba with combining method {} and coupling method {}".format(self.name_, coupling_method))
         coup_m = coup_picker(coupling_method)
         if coup_m is None and not return_lin_comb:
             print("Unknown coupling method {} selected".format(coupling_method))
@@ -635,8 +637,6 @@ class LogregTorch(GeneralLogreg):
         Returns:
             torch.tensor: fitted coefficients. shape: k x k x c + int(fit_intercept). Only models where k1 < k2 have nonzero coefficients.
         """
-        if verbose > 0:
-            print("Starting logreg_torch fit")
         grad_accumulating = micro_batch is not None and micro_batch < (n // k * 2)
         
         coefs = torch.zeros(size=(k, k, c + int(self.fit_interc_)), device=self.dev_, dtype=self.dtp_, requires_grad=True)
@@ -801,8 +801,6 @@ class Grad(GeneralLinearCombiner):
         Returns:
             torch.tensor: Tensor of model coefficients. Shape k × k × (c + 1). Where k is number of classes and c is number of combined classifiers.
         """
-        if verbose > 0:
-            print("Starting grad_{} fit".format(self.coupling_m_))
         c, n, k = X.shape
         
         coefs = torch.full(size=(k, k, c + 1), fill_value=1.0 / c, device=self.dev_, dtype=self.dtp_)

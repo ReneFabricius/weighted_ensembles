@@ -40,7 +40,7 @@ def m1(PP, verbose=0):
         print("Resulting probabilities\n{}".format(ps.cpu().numpy()))
 
     end = timer()
-    if verbose > 0:
+    if verbose > 2:
         print("Method m1 finished in {:.4f} s".format(end - start))
 
     return ps
