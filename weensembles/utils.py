@@ -142,7 +142,7 @@ def cuda_mem_try(fun, start_bsz, device, dec_coef=0.5, max_tries=None, verbose=0
                 max_tries -= 1
             with torch.cuda.device(device):
                 torch.cuda.empty_cache()
-            if verbose > 2:
+            if verbose > 1:
                 print(str(rerr))
                 print_memory_statistics(device=device)
             del rerr
