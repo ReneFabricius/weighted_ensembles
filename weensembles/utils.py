@@ -1,6 +1,6 @@
 import torch
 import gc
-
+import psutil
 
 def gen_probs(c, n, k, device=torch.device("cuda"), dtype=torch.float32):
     """
@@ -137,12 +137,15 @@ def cuda_mem_try(fun, start_bsz, device, dec_coef=0.5, max_tries=None, verbose=0
                 raise rerr
             if verbose > 1:
                 print("CUDA oom exception")
-            del rerr
             batch_size = int(dec_coef * batch_size)
             if max_tries is not None:
                 max_tries -= 1
             with torch.cuda.device(device):
                 torch.cuda.empty_cache()
+            if verbose > 2:
+                print(str(rerr))
+                print_memory_statistics(device=device)
+            del rerr
     else:
         raise RuntimeError("Unsuccessful to perform the requested action. CUDA out of memory.")
             
@@ -208,3 +211,7 @@ def print_memory_statistics(device="gpu:0", list_tensors=False):
                         print(type(obj), obj.size(), obj.device)
                 except:
                     pass
+    
+    virt_mem = psutil.virtual_memory()
+    print("Total: {:.3f}GB, available: {:.3f}GB, used: {:.3f}GB, free: {:.3f}GB".format(
+        getattr(virt_mem, "total") / 2 ** 30, getattr(virt_mem, "available") / 2 ** 30, getattr(virt_mem, "used") / 2 ** 30, getattr(virt_mem, "free") / 2 ** 30))
