@@ -273,9 +273,9 @@ class GeneralLinearCombiner(GeneralCombiner):
             M = torch.sum(M, dim=0, dtype=torch.bool)
             ps = torch.zeros(curn, k, device=self.dev_, dtype=self.dtp_)
             # Selected class counts for every n
-            NPC = torch.sum(M, 1).squeeze()
+            NPC = torch.sum(M, dim=1)
             # goes over possible numbers of classes in union of top l classes from each constituent classifier
-            for pc in range(l, l * c + 1):
+            for pc in range(l, l * c + 1 if l < self.k_ else l + 1):
                 # Pick those samples which have pc classes in the union
                 samplM = NPC == pc
                 # pcn x c x k tensor
@@ -744,15 +744,14 @@ class Average(GeneralLinearCombiner):
                 coefs[ci] = 1.0 / ts.temp_.item()
 
         else:
-            c, n, k = X.shape
             if self.combine_probs_:
-                coefs = torch.ones(size=(c + 1, ), device=self.dev_, dtype=self.dtp_)
+                coefs = torch.ones(size=(self.c_ + 1, ), device=self.dev_, dtype=self.dtp_)
             else:
-                coefs = torch.full(size=(c + 1, ), fill_value=1.0 / c, device=self.dev_, dtype=self.dtp_)
+                coefs = torch.full(size=(self.c_ + 1, ), fill_value=1.0 / self.c_, device=self.dev_, dtype=self.dtp_)
             
-            coefs[c] = 0
+            coefs[self.c_] = 0
         
-        return coefs.expand(k, k, -1)
+        return coefs.expand(self.k_, self.k_, -1)
 
 
 class Grad(GeneralLinearCombiner):
