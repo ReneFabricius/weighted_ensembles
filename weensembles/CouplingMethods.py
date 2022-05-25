@@ -16,10 +16,8 @@ def m1(PP, verbose=0):
     n, k, kk = PP.size()
     assert k == kk
     PP = PP * (1 - torch.eye(k, k, device=device))
-    if verbose > 2:
-        print("Working with {} samples, each with {} classes".format(n, k))
-        if verbose > 3:
-            print("Solving for pairwise probabilities\n{}".format(PP.cpu().numpy()))
+    if verbose > 3:
+        print("Solving for pairwise probabilities\n{}".format(PP.cpu().numpy()))
 
     E = torch.eye(k, device=device, dtype=dtype)
     Es = E.unsqueeze(0).expand(n, k, k)
@@ -36,7 +34,7 @@ def m1(PP, verbose=0):
     
     ps = Xs[:, 0:k, 0:1].squeeze(2)
 
-    if verbose > 2:
+    if verbose > 3:
         print("Resulting probabilities\n{}".format(ps.cpu().numpy()))
 
     end = timer()
@@ -67,7 +65,7 @@ def m2(PP, verbose=0):
     B[:, k, :] = 1
 
     Q = (PP * PP).sum(dim=1).diag_embed() - PP * PP.transpose(1, 2)
-    if verbose > 2:
+    if verbose > 3:
         print("Matrix Q:\n{}".format(Q.cpu().numpy()))
 
     A = torch.cat((Q, es), 2)
