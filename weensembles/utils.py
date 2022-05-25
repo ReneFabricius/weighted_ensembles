@@ -2,7 +2,7 @@ import torch
 import gc
 import psutil
 
-def gen_probs(c, n, k, device=torch.device("cuda"), dtype=torch.float32):
+def gen_probs(c, n, k, device="cpu", dtype=torch.float32):
     """
     Generates random outputs of probabilistic classifiers.
 
@@ -19,7 +19,7 @@ def gen_probs(c, n, k, device=torch.device("cuda"), dtype=torch.float32):
     return p
 
 
-def gen_probs_one_source(n, k, device=torch.device("cuda"), dtype=torch.float32):
+def gen_probs_one_source(n, k, device="cpu", dtype=torch.float32):
     """
     Generates random outputs of probabilistic classifier.
 
@@ -142,9 +142,11 @@ def cuda_mem_try(fun, start_bsz, device, dec_coef=0.5, max_tries=None, verbose=0
                 max_tries -= 1
             with torch.cuda.device(device):
                 torch.cuda.empty_cache()
+            collected = gc.collect()
             if verbose > 1:
                 print(str(rerr))
-                print_memory_statistics(device=device)
+                print_memory_statistics(device=device, list_tensors=True)
+                print("Number of garbages collected: {}".format(collected))
             del rerr
     else:
         raise RuntimeError("Unsuccessful to perform the requested action. CUDA out of memory.")
