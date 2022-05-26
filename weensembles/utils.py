@@ -143,9 +143,9 @@ def cuda_mem_try(fun, start_bsz, device, dec_coef=0.5, max_tries=None, verbose=0
             with torch.cuda.device(device):
                 torch.cuda.empty_cache()
             collected = gc.collect()
-            if verbose > 1:
+            if verbose > 2:
                 print(str(rerr))
-                print_memory_statistics(device=device, list_tensors=True)
+                print_memory_statistics(device=device, list_tensors=verbose > 3)
                 print("Number of garbages collected: {}".format(collected))
             del rerr
     else:

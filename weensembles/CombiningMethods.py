@@ -348,7 +348,7 @@ class GeneralLinearCombiner(GeneralCombiner):
         ps_full = torch.cat(ps_list, dim=0)
         end = timer()
         if verbose > 0:
-            print("Predict proba topl fast simple finished in " + str(end - start) + " s")
+            print("Predict proba simple finished in " + str(end - start) + " s")
 
         return ps_full
 
