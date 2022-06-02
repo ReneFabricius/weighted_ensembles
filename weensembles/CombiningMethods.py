@@ -11,7 +11,7 @@ from torch.special import expit
 import numpy as np
 from abc import ABC, abstractmethod
 
-from weensembles.CalibratingMethods import CalibratingMethod, TemperatureScaling
+from weensembles.CalibratingMethods import cal_picker
 from weensembles.CouplingMethods import coup_picker
 from weensembles.predictions_evaluation import compute_acc_topk, compute_nll, compute_pairwise_accuracies
 from weensembles.utils import cuda_mem_try, pairwise_accuracies, pairwise_accuracies_penultimate, arguments_dict
@@ -738,7 +738,7 @@ class Average(GeneralLinearCombiner):
             c, n, k = X.shape
             coefs = torch.zeros(size=(c + 1, ), device=self.dev_, dtype=self.dtp_)
             for ci in range(c):
-                ts = TemperatureScaling(device=self.dev_, dtp=self.dtp_)
+                ts = cal_picker("TemperatureScaling", device=self.dev_, dtype=self.dtp_)
                 ts.fit(X[ci], y, verbose=verbose)
                 coefs[ci] = 1.0 / ts.temp_.item()
 

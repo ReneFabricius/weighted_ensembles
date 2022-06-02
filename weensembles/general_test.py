@@ -82,7 +82,7 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
 
         WE = WeightedLinearEnsemble(c=c, k=k, device=device, dtp=dtype)
 
-        WE.fit(MP=tcs, tar=tar, comb_m="logreg", verbose=verbose, test_normality=test_normality, penultimate=fit_on_penultimate)
+        WE.fit(preds=tcs, labels=tar, comb_m="logreg", verbose=verbose, test_normality=test_normality)
         WE.save(os.path.join(output_model_fold, models_file))
         if save_pvals:
             WE.save_pvals(os.path.join(output_folder, "p_values.npy"))
@@ -118,7 +118,7 @@ def ensemble_general_test(data_train_path, data_test_path, targets, order, outpu
     with torch.no_grad():
         for cp_m in coupling_methods:
             print("Testing coupling method " + cp_m)
-            PPtl = cuda_mem_try(fun=lambda bsz: WE.predict_proba(MP=tcs_test,
+            PPtl = cuda_mem_try(fun=lambda bsz: WE.predict_proba(preds=tcs_test,
                                                                  coupling_method=cp_m,
                                                                  l=combining_topl if combining_topl > 0 else None,
                                                                  batch_size=bsz),
