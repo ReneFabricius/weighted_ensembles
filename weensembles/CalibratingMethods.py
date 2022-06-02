@@ -6,11 +6,20 @@ from torchmin import minimize
 from timeit import default_timer as timer
 from torch.nn import Softmax, LogSoftmax, NLLLoss
 import torch
+import re
+
+from zmq import device
 
 from weensembles.predictions_evaluation import ECE_sweep
+from weensembles.PostprocessingMethod import PostprocessingMethod
+from weensembles.utils import arguments_dict
 
 
-class CalibrationMethod(ABC):
+class CalibratingMethod(PostprocessingMethod):
+    def __init__(self, req_val, name, device: str="cpu", dtype: torch.dtype=torch.float32):
+        super().__init__(req_val=req_val, name=name)
+        self.dev_ = device
+        self.dtp_ = dtype
     """
     Abstract class for calibration method.
     """
@@ -59,21 +68,21 @@ class CalibrationMethod(ABC):
         Args:
             device (string): device
         """
+        pass
 
 
-class TemperatureScaling(CalibrationMethod):
+class TemperatureScaling(CalibratingMethod):
     """
     Temperature scaling calibration method.
     """
-    def __init__(self, start_temp=1.0, max_iter=50, device=torch.device("cpu"), dtp=torch.float32):
+    def __init__(self, name, start_temp=1.0, max_iter=50, device=torch.device("cpu"), dtype=torch.float32):
         """
         :param start_temp: Starting temperature. 1.0 means no change.
         :param max_iter: maximum number of iterations of optimizer
         """
-        self.temp_ = torch.tensor([start_temp], device=device, dtype=dtp)
+        super().__init__(req_val=False, name=name, device=device, dtype=dtype)
+        self.temp_ = torch.tensor([start_temp], device=device, dtype=dtype)
         self.max_iter_ = max_iter
-        self.dev_ = device
-        self.dtp_ = dtp
 
     def _nll_loss(self, temp, logit_pred, tar):
         """
@@ -169,3 +178,15 @@ class TemperatureScaling(CalibrationMethod):
     @torch.no_grad()
     def set_dev(self, device):
         self.dev_ = device
+
+
+cal_methods = {"TemperatureScaling": [TemperatureScaling, {}]}
+
+def cal_picker(cal_m: str, device: str="cpu", dtype: torch.dtype=torch.float32):
+    m = re.match(r"^(?P<cal>.+?)(\{(?P<args>.*)\})?$", cal_m)
+    cal_m_name = m.group("cal")
+    args_dict = arguments_dict(m.group("args"))
+    if cal_m_name not in cal_methods:
+        return None
+    
+    return cal_methods[cal_m_name][0](device=device, dtype=dtype, name=cal_m_name, **args_dict)

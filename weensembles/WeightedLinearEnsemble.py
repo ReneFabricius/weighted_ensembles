@@ -10,9 +10,10 @@ from torch.special import expit
 from weensembles.CouplingMethods import coup_picker
 from weensembles.CombiningMethods import comb_picker
 from weensembles.utils import logit, pairwise_accuracies, pairwise_accuracies_penultimate
+from weensembles.Ensemble import Ensemble
 
 
-class WeightedLinearEnsemble:
+class WeightedLinearEnsemble(Ensemble):
     def __init__(self, c=0, k=0, device=torch.device("cpu"), dtp=torch.float32):
         """
         Trainable ensembling of classification posteriors.
@@ -21,53 +22,48 @@ class WeightedLinearEnsemble:
         :param device: Torch device to use for computations
         :param dtp: Torch datatype to use for computations
         """
-        self.dev_ = device
-        self.dtp_ = dtp
+        super().__init__(c=c, k=k, device=device, dtp=dtp)
         self.logit_eps_ = 1e-5
-        self.c_ = c
-        self.k_ = k
         self.comb_model_ = None 
 
-    def fit(self, MP, tar, combining_method,
-            verbose=0, MP_val=None, tar_val=None, **kwargs):
+    def fit(self, preds, labels, combining_method,
+            verbose=0, val_preds=None, val_labels=None, **kwargs):
         """
         Trains combining method on logits of several classifiers.
         
         Args:
             combining_method (string): Combining method to use.
-            MP (torch.tensor): c x n x k tensor of constituent classifiers outputs.
+            preds (torch.tensor): c x n x k tensor of constituent classifiers outputs.
             c - number of constituent classifiers, n - number of training samples, k - number of classes
-            tar (torch.tensor): n tensor of sample labels
+            labels (torch.tensor): n tensor of sample labels
             verbose (int): Verbosity level.
-            MP_val (torch.tensor): Validation set used for hyperparameter sweep. Required if combining_method.req_val is True.
-            tar_val (torch.tensor): Validation set targets. Required if combining_method.req_val is True. 
+            val_preds (torch.tensor): Validation set used for hyperparameter sweep. Required if combining_method.req_val is True.
+            val_labels (torch.tensor): Validation set targets. Required if combining_method.req_val is True. 
         """
         if verbose > 0:
             print("Starting fit, combining method: {}".format(combining_method))
         comb_m = comb_picker(combining_method, c=self.c_, k=self.k_, device=self.dev_, dtype=self.dtp_)
         if comb_m is None:
-            print("Unknown combining method {} selected".format(combining_method))
-            return 1
+            raise ValueError("Unknown combining method {} selected".format(combining_method))
         
         self.comb_model_ = comb_m
         
         inc_val = comb_m.req_val_
-        if inc_val and (MP_val is None or tar_val is None):
-            print("MP_val and tar_val are required for combining method {}".format(combining_method))
-            return 1
+        if inc_val and (val_preds is None or val_labels is None):
+            raise ValueError("val_preds and val_labels are required for combining method {}".format(combining_method))
         
-        self.comb_model_.fit(X=MP, y=tar, val_X=MP_val, val_y=tar_val, verbose=verbose, **kwargs)
+        self.comb_model_.fit(X=preds, y=labels, val_X=val_preds, val_y=val_labels, verbose=verbose, **kwargs)
         
             
     @torch.no_grad()
-    def predict_proba(self, MP, coupling_method, verbose=0, l=None, batch_size=None):
+    def predict_proba(self, preds, coupling_method, verbose=0, l=None, batch_size=None):
         """
         Combines outputs of constituent classifiers using all classes.
         
         Args:
             batch_size (int, optional): batch size for coupling method, default None - single batch. Defaults to None.
             verbosity (int, optional): Level of detailed output. Defaults to 0.
-            MP (torch.tensor): c x n x k tensor of constituent classifiers posteriors
+            preds (torch.tensor): c x n x k tensor of constituent classifiers posteriors
             c - number of constituent classifiers, n - number of training samples, k - number of classes
             coupling_method (str): coupling method to use
             l (int, optional): If specified, only top l classes of each classifier are considered in the final prediction. Defaults to None.
@@ -75,7 +71,7 @@ class WeightedLinearEnsemble:
         Returns: 
             torch.tensor: n x k tensor of combined posteriors
         """
-        probs = self.comb_model_.predict_proba(X=MP, coupling_method=coupling_method, l=l, verbose=verbose, batch_size=batch_size)
+        probs = self.comb_model_.predict_proba(X=preds, coupling_method=coupling_method, l=l, verbose=verbose, batch_size=batch_size)
 
         return probs
 

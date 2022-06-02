@@ -11,22 +11,21 @@ from torch.special import expit
 import numpy as np
 from abc import ABC, abstractmethod
 
-from weensembles.CalibrationMethod import CalibrationMethod, TemperatureScaling
+from weensembles.CalibratingMethods import CalibratingMethod, TemperatureScaling
 from weensembles.CouplingMethods import coup_picker
 from weensembles.predictions_evaluation import compute_acc_topk, compute_nll, compute_pairwise_accuracies
-from weensembles.utils import cuda_mem_try, pairwise_accuracies, pairwise_accuracies_penultimate
+from weensembles.utils import cuda_mem_try, pairwise_accuracies, pairwise_accuracies_penultimate, arguments_dict
+from weensembles.PostprocessingMethod import PostprocessingMethod
 
 
-class GeneralCombiner(ABC):
+class GeneralCombiner(PostprocessingMethod):
     """ Abstract class for combining methods.
     """
-    
     def __init__(self, c, k, req_val, uncert, device, dtype, name):
-        self.req_val_ = req_val or uncert
+        super().__init__(req_val=req_val or uncert, name=name)
         self.uncert_ = uncert
         self.dev_ = device
         self.dtp_ = dtype
-        self.name_ = name
         self.c_ = c
         self.k_ = k
         
@@ -1100,29 +1099,6 @@ regularization_coefficients = {
     "grad_m2": {"base_C": 10 ** (-0.6)},
     "grad_m2.uncert": {"base_C": 10 ** (0.0)}   
 }
-
-
-def arguments_dict(dict_str):
-    res = {}
-    if dict_str is None:
-        return res
-    
-    for arg in dict_str.split(","):
-        name, value = arg.split(":")
-        if value == "True":
-            value = True
-        elif value == "False":
-            value = False
-        else:
-            try:
-                value = float(value)
-            except ValueError:
-                print("Warning: unsupported argument type in argument-value pair {}".format(arg))
-                continue
-        
-        res[name] = value
-    
-    return res
 
 
 def comb_picker(co_m, c, k, device="cpu", dtype=torch.float):

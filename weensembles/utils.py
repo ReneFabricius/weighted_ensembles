@@ -217,3 +217,27 @@ def print_memory_statistics(device="gpu:0", list_tensors=False):
     virt_mem = psutil.virtual_memory()
     print("Total: {:.3f}GB, available: {:.3f}GB, used: {:.3f}GB, free: {:.3f}GB".format(
         getattr(virt_mem, "total") / 2 ** 30, getattr(virt_mem, "available") / 2 ** 30, getattr(virt_mem, "used") / 2 ** 30, getattr(virt_mem, "free") / 2 ** 30))
+
+
+def arguments_dict(dict_str):
+    res = {}
+    if dict_str is None:
+        return res
+    
+    for arg in dict_str.split(","):
+        name, value = arg.split(":")
+        if value == "True":
+            value = True
+        elif value == "False":
+            value = False
+        else:
+            try:
+                value = float(value)
+            except ValueError:
+                print("Warning: unsupported argument type in argument-value pair {}".format(arg))
+                continue
+        
+        res[name] = value
+    
+    return res
+

@@ -2,7 +2,10 @@ import torch
 import pickle
 import pandas as pd
 
-class CalibrationEnsemble:
+from weensembles.Ensemble import Ensemble
+from weensembles.CalibratingMethods import cal_picker
+
+class CalibrationEnsemble(Ensemble):
     def __init__(self, c=0, k=0, device=torch.device("cpu"), dtp=torch.float32):
         """
         Trainable ensembling of classification posteriors.
@@ -11,39 +14,40 @@ class CalibrationEnsemble:
         :param device: Torch device to use for computations
         :param dtp: Torch datatype to use for computations
         """
-        self.dev_ = device
-        self.dtp_ = dtp
-        self.c_ = c
-        self.k_ = k
+        super().__init__(c=c, k=k, device=device, dtp=dtp)
         self.cal_models_ = [None for _ in range(c)]
 
     @torch.no_grad()
-    def fit(self, MP, tar, calibration_method, verbose=0):
+    def fit(self, preds, labels, calibration_method, verbose=0, **kwargs):
         """
         Fit the calibration model for each combined classifier.
-        :param MP: Predictions from penultimate layer or logits.
+        :param preds: Predictions from penultimate layer or logits.
         c×n×k tensor with c classifiers, n samples and k classes
-        :param tar: Correct labels. n tensor with n samples.
+        :param labels: Correct labels. n tensor with n samples.
         :param calibration_method: Calibration method to use.
         :param verbose: Print extra info.
         :return:
         """
 
-        c, n, k = MP.shape
+        c, n, k = preds.shape
 
         assert c == self.c_
         assert k == self.k_
 
         for ci in range(c):
-            self.cal_models_[ci] = calibration_method(device=self.dev_, dtp=self.dtp_)
-            self.cal_models_[ci].fit(MP[ci], tar, verbose=verbose)
+            cal_m_obj = cal_picker(calibration_method, device=self.dev_, dtype=self.dtp_)
+            if cal_m_obj is None:
+                raise ValueError("Unknown calibrating method selected: {}".format(calibration_method))
+
+            self.cal_models_[ci] = cal_m_obj 
+            self.cal_models_[ci].fit(preds[ci], labels, verbose=verbose)
 
     @torch.no_grad()
-    def predict_proba(self, MP, output_net_preds=False):
+    def predict_proba(self, preds, output_net_preds=False):
         """
         Combines the outputs of classifiers and produces probabilities.
         :param output_net_preds: If True, method also outputs calibrated network predictions.
-        :param MP: Penultimate layer outputs or logits to combine.
+        :param preds: Penultimate layer outputs or logits to combine.
         c×n×k tensor with c classifiers, n samples and k classes
         :return: Predicted probabilities. n×k tensor with n samples and k classes
         """
@@ -51,14 +55,14 @@ class CalibrationEnsemble:
             print("Error: ensemble was not trained.")
             return 1
 
-        c, n, k = MP.shape
+        c, n, k = preds.shape
 
         assert c == self.c_
         assert k == self.k_
 
         cal_MP_l = []
         for ci in range(c):
-            cal_prob = self.cal_models_[ci].predict_proba(MP[ci].cpu())
+            cal_prob = self.cal_models_[ci].predict_proba(preds[ci].cpu())
             cal_MP_l.append(cal_prob.unsqueeze(0))
 
         cal_MP = torch.cat(cal_MP_l, dim=0).to(dtype=self.dtp_, device=self.dev_)
