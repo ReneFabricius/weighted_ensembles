@@ -111,7 +111,7 @@ class Test_WLEPredict(unittest.TestCase):
         wle.fit(preds=net_outputs["val_outputs"], labels=net_outputs["val_labels"],
                 combining_method="logreg_torch")
         
-        prediction = wle.predict_proba(preds=net_outputs["test_outputs"], coupling_method=coup_m,
+        prediction, unc = wle.predict_proba(preds=net_outputs["test_outputs"], coupling_method=coup_m,
                                        l=l, batch_size=bsz)
         
         tc, tn, tk = net_outputs["test_outputs"].shape

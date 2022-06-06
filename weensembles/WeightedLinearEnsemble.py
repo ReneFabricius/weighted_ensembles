@@ -56,7 +56,7 @@ class WeightedLinearEnsemble(Ensemble):
         
             
     @torch.no_grad()
-    def predict_proba(self, preds, coupling_method, verbose=0, l=None, batch_size=None):
+    def predict_proba(self, preds, coupling_method, verbose=0, l=None, batch_size=None, predict_uncertainty=False):   
         """
         Combines outputs of constituent classifiers using all classes.
         
@@ -67,11 +67,13 @@ class WeightedLinearEnsemble(Ensemble):
             c - number of constituent classifiers, n - number of training samples, k - number of classes
             coupling_method (str): coupling method to use
             l (int, optional): If specified, only top l classes of each classifier are considered in the final prediction. Defaults to None.
+            predict_uncertainty(bool, optional): Whether to compute uncertainty measure. Defaults to False.
             
         Returns: 
             torch.tensor: n x k tensor of combined posteriors
         """
-        probs = self.comb_model_.predict_proba(X=preds, coupling_method=coupling_method, l=l, verbose=verbose, batch_size=batch_size)
+        probs = self.comb_model_.predict_proba(X=preds, coupling_method=coupling_method, l=l, verbose=verbose,
+                                               batch_size=batch_size, predict_uncertainty=predict_uncertainty)
 
         return probs
 

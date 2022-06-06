@@ -60,7 +60,7 @@ class GeneralCombiner(PostprocessingMethod):
         pass
 
     @abstractmethod
-    def predict_proba(self, X, coupling_method, l=None, verbose=0, batch_size=None):
+    def predict_proba(self, X, coupling_method, l=None, verbose=0, batch_size=None, predict_uncertainty=False):
         """Predicts probability based on provided predictors.
 
         Args:
@@ -69,6 +69,8 @@ class GeneralCombiner(PostprocessingMethod):
             l (int, optional): If specified, performs prediction considering only top l most probable classes from each classifier. Defaults to None.
             verbose (int, optional): Verbosity level. Defaults to 0.
             batch_size (int, optional): Batch size for processing. Doesnt affect the output, only memory consumption. Defaults to None.
+            predict_uncertainty(bool, optional): Whether to compute uncertainty measure. Defaults to False.
+
         """
         pass
     
@@ -131,7 +133,7 @@ class GeneralLinearCombiner(GeneralCombiner):
         if self.uncert_:
             self.cal_models_ = []
             for cler_i in range(self.c_):
-                cal_m = TemperatureScaling(device=self.dev_, dtp=self.dtp_)
+                cal_m = cal_picker("TemperatureScaling", device=self.dev_, dtype=self.dtp_) 
                 cal_m.fit(logit_pred=X[cler_i], tar=y, verbose=verbose)
                 self.cal_models_.append(cal_m)
 
@@ -215,7 +217,8 @@ class GeneralLinearCombiner(GeneralCombiner):
     def train(self, X, y, val_X=None, val_y=None, verbose=0):
         pass
     
-    def predict_proba(self, X, coupling_method, l=None, verbose=0, batch_size=None, coefs=None, combine_probs=None, return_lin_comb=False):
+    def predict_proba(self, X, coupling_method, l=None, verbose=0, batch_size=None, coefs=None,
+                      combine_probs=None, predict_uncertainty=False):
         """
         Combines outputs of constituent classifiers using only those classes, which are among the top l most probable
         for some constituent classifier. All coefficients are used, both for classes i, j and j, i.
@@ -225,6 +228,7 @@ class GeneralLinearCombiner(GeneralCombiner):
         :param coupling_method: coupling method to use
         :param batch_size: if not none, the size of the batches to use
         :param coefs: k x k x c + 1 tensor of coefficients used for prediction instead of model coefficients.
+        :param predict_uncertainty(bool, optional): Whether to compute uncertainty measure. Defaults to False.
         Coefficients are taken as is, they are not necesarilly symmetric.
         :return: n x k tensor of combined posteriors
         """
@@ -247,7 +251,7 @@ class GeneralLinearCombiner(GeneralCombiner):
             l = self.k_
         b_size = batch_size if batch_size is not None else n
         ps_list = []
-        lin_comb_list = []
+        unc_list = []
 
         for start_ind in range(0, n, b_size):
             curMP = X[:, start_ind:(start_ind + b_size), :].to(device=self.dev_, dtype=self.dtp_)
@@ -314,12 +318,7 @@ class GeneralLinearCombiner(GeneralCombiner):
                     pw_probs = expit(pw_w_supports)
                     pcR = torch.mean(pw_probs, dim=-1)
                 else:
-                    if return_lin_comb:
-                        lin_comb_list.append((torch.sum(pw_w_supports, dim=-1) + Bs).unsqueeze(0))
-                        continue
-
                     pcR = expit(torch.sum(pw_w_supports, dim=-1) + Bs)
-                    
                                  
                 if self.uncert_:
                     pcMPprob = curMPprob[:, samplM]
@@ -332,24 +331,25 @@ class GeneralLinearCombiner(GeneralCombiner):
                     uncR = torch.full_like(input=pcR, fill_value=0.5)
                     # Add uncertainty to pairwise probabilities according to coupR
                     pcR = coupR * pcR + (1.0 - coupR) * uncR
-
-                pc_probs = coup_m(pcR, verbose=verbose)
+                    
+                pc_probs, pc_uncs = coup_m(pcR, verbose=verbose, out_unc=predict_uncertainty)
                 pc_ps = torch.zeros(pcn, k, device=self.dev_, dtype=self.dtp_)
                 pc_ps[pcM] = torch.flatten(pc_probs)
                 ps[NPC == pc] = pc_ps
+                unc_list.append(pc_uncs)
             
             ps_list.append(ps)
 
-        if return_lin_comb:
-            lin_comb_full = torch.cat(lin_comb_list, dim=0)
-            return lin_comb_full
-        
         ps_full = torch.cat(ps_list, dim=0)
+        if predict_uncertainty:
+            unc_full = torch.cat(unc_list, dim=0)
+        else:
+            unc_full = None
         end = timer()
         if verbose > 0:
             print("Predict proba simple finished in " + str(end - start) + " s")
 
-        return ps_full
+        return ps_full, unc_full
 
     def score(self, X, y, coupling_method, coefs=None):
         """Computes accuracy of model with given coefficients on given data.
@@ -363,7 +363,7 @@ class GeneralLinearCombiner(GeneralCombiner):
         Returns:
             float: Top 1 accuracy of model.
         """
-        prob = self.predict_proba(X=X, coupling_method=coupling_method, coefs=coefs if coefs is not None else self.coefs_)
+        prob, unc = self.predict_proba(X=X, coupling_method=coupling_method, coefs=coefs if coefs is not None else self.coefs_)
         preds = torch.argmax(prob, dim=1)
         return torch.sum(preds == y).item() / len(y)
     
@@ -814,7 +814,7 @@ class Grad(GeneralLinearCombiner):
         if test_period is not None:
             with torch.no_grad():
                 test_bsz = X.shape[1]
-                test_pred = cuda_mem_try(
+                test_pred, _ = cuda_mem_try(
                     fun=lambda bsz: self.predict_proba(X=X, l=k, coupling_method=self.coupling_m_, verbose=max(verbose - 2, 0), batch_size=bsz, coefs=coefs),
                     start_bsz=test_bsz, verbose=verbose, device=X.device)
                 
@@ -846,7 +846,7 @@ class Grad(GeneralLinearCombiner):
                             X_mb = X_batch[:, mbatch_s:(mbatch_s + mbatch_sz)]
                             y_mb = y_batch[mbatch_s:(mbatch_s + mbatch_sz)]
                             pred = thresh(self.predict_proba(X=X_mb, l=k, coupling_method=self.coupling_m_,
-                                                                verbose=max(verbose - 2, 0), batch_size=mbatch_sz, coefs=coefs))
+                                                                verbose=max(verbose - 2, 0), batch_size=mbatch_sz, coefs=coefs)[0])
                             loss = nll_loss(torch.log(pred), y_mb) * (len(y_mb) / len(y_batch))
                             loss.backward()
                         
@@ -867,7 +867,7 @@ class Grad(GeneralLinearCombiner):
                 
             if test_period is not None and (e + 1) % test_period == 0:
                 with torch.no_grad():
-                    test_pred = cuda_mem_try(
+                    test_pred, _ = cuda_mem_try(
                         fun=lambda bsz: self.predict_proba(X=X, l=k, coupling_method=self.coupling_m_, verbose=max(verbose - 2, 0), batch_size=bsz, coefs=coefs),
                         start_bsz=test_bsz, verbose=verbose, device=X.device)
 
@@ -975,7 +975,7 @@ class Neural(GeneralCombiner):
                 cur_inp = X_perm[:, start_ind:(start_ind + batch_size)].to(device=self.dev_, dtype=self.dtp_)
                 cur_lab = y_perm[start_ind:(start_ind + batch_size)].to(device=self.dev_)
                 curn = cur_inp.shape[1]
-                pred = cuda_mem_try(
+                pred, _ = cuda_mem_try(
                     fun=lambda bsz: self.predict_proba(X=cur_inp, coupling_method=self.coupling_m_, verbose=verbose - 1, batch_size=bsz),
                     start_bsz=curn,
                     device=self.dev_,
@@ -990,7 +990,7 @@ class Neural(GeneralCombiner):
             if test_period is not None and (e + 1) % test_period == 0:
                 self.net_.eval()
                 with torch.no_grad():
-                    pred = cuda_mem_try(
+                    pred, _ = cuda_mem_try(
                         fun=lambda bsz: self.predict_proba(X=X, coupling_method=self.coupling_m_, verbose=verbose - 1, batch_size=bsz),
                         start_bsz=curn,
                         device=self.dev_,
@@ -1059,7 +1059,7 @@ class Neural(GeneralCombiner):
         return ps_full
 
     def score(self, X, y, coupling_method):
-        prob = self.predict_proba(X=X, coupling_method=coupling_method)
+        prob, _ = self.predict_proba(X=X, coupling_method=coupling_method)
         preds = torch.argmax(prob, dim=1)
         return torch.sum(preds == y).item() / len(y)
        
