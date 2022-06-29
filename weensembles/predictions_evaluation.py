@@ -1,5 +1,5 @@
 import torch
-
+from tensorflow.keras.metrics import AUC
 
 @torch.no_grad()
 def compute_pairwise_accuracies(MP, tar):
@@ -160,3 +160,22 @@ def compute_error_inconsistency(preds, tar, topk=1):
     all_cor = torch.sum(num_cor == c)
     err_inc = (torch.sum(num_cor > 0) - all_cor) / n
     return err_inc.item(), all_cor.item() / n
+
+def compute_au_from_scores(scores: torch.tensor, labels: torch.tensor, metric: str) -> float:
+    """Computes area under ROC or PR curve.
+
+    Args:
+        scores (torch.tensor): Numerical scores between 0 and 1.
+        labels (torch.tensor): Correct labels 0 and 1.
+        metric (str): Specifies the curve to be used: auroc or auprc.
+
+    Returns:
+        float: _description_
+    """
+    if metric.lower() == "auroc":
+        au = AUC(num_thresholds=len(scores), curve="ROC")
+    elif metric.lower() == "auprc":
+        au = AUC(num_thresholds=len(scores), curve="PR")
+        
+    au.update_state(labels.cpu(), scores.cpu())
+    return au.result().numpy()
