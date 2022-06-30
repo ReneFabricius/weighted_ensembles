@@ -170,7 +170,7 @@ def compute_au_from_scores(scores: torch.tensor, labels: torch.tensor, metric: s
         metric (str): Specifies the curve to be used: auroc or auprc.
 
     Returns:
-        float: _description_
+        float: Area under the curve.
     """
     if metric.lower() == "auroc":
         au = AUC(num_thresholds=len(scores), curve="ROC")
@@ -179,3 +179,23 @@ def compute_au_from_scores(scores: torch.tensor, labels: torch.tensor, metric: s
         
     au.update_state(labels.cpu(), scores.cpu())
     return au.result().numpy()
+
+def compute_au_from_uncerts(id_uncerts: torch.tensor, ood_uncerts: torch.tensor, metric:str) -> float:
+    """Computes area under ROC or PR curve.
+
+    Args:
+        id_uncerts (torch.tensor): Uncertainty scores for in distribution samples.
+        ood_uncerts (torch.tensor): Uncertainty scores for out of distribution samples.
+        metric (str): Metric to compute: auroc or auprc.
+
+    Returns:
+        float: Area under the curve.
+    """
+    uncerts = torch.cat([id_uncerts, ood_uncerts])
+    scores = (uncerts - torch.min(uncerts)) / (torch.max(uncerts) - torch.min(uncerts))
+    labels = torch.cat([
+        torch.zeros(size=(len(id_uncerts),), dtype=torch.long, device=id_uncerts.device),
+        torch.ones(size=(len(ood_uncerts),), dtype=torch.long, device=id_uncerts.device)
+    ])
+    
+    return compute_au_from_scores(scores=scores, labels=labels, metric=metric)
