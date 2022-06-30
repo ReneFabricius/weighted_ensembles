@@ -269,8 +269,8 @@ class BayesCov(CouplingMethod):
         u = torch.matmul(MMiM, s)
         
         if out_unc:
-            proj = torch.matmul(u, M)
-            dist = s - proj
+            proj = torch.matmul(u.T, M)
+            dist = s.T - proj
             unc = dist.norm(p=2, dim=1)
         else:
             unc = None
