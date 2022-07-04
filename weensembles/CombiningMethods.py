@@ -156,7 +156,7 @@ class GeneralLinearCombiner(GeneralCombiner):
                     # Tensor contains support of networks for class fc minus support for class sc
                     SS = X[:, SamM][:, :, fc] - X[:, SamM][:, :, sc]
 
-                    # s x c tensor of logit supports of k networks for class fc against class sc for s samples
+                    # s x c tensor of logit supports of c networks for class fc against class sc for s samples
                     pw_X = SS.squeeze().transpose(0, 1)
 
                     if self.req_val_:
@@ -214,7 +214,30 @@ class GeneralLinearCombiner(GeneralCombiner):
         
     
     @abstractmethod
-    def train(self, X, y, val_X=None, val_y=None, verbose=0):
+    def train(self, X: torch.tensor, y: torch.tensor, val_X: torch.tensor=None, val_y: torch.tensor=None, verbose: int=0) -> torch.tensor:
+        """Method for computing the combiner coefficients. Method is given predictors and is expected to output coefficients.
+        In case of combining methods with fit_pairwise_ == True: 
+            X contains logit supports of first class (fc) against the second class (sc), that is logit_fc - logit_sc. The shape of X is s x c,
+            where s is number of samples belonging to fc or sc and c is number of combined classifiers.
+            y contains labels for these samples. 1 for fc and 0 for sc. Shape s.
+            The output is expected to be of shape c + 1 and contain coefficients for each of the combined classifiers and an intercept for this single class pair.
+        In case of combining methods with fit_pairwise_ == False:
+            X contains logit outputs of the combined classifiers. The shape of X is c x n x k, where c is number of combined classifiers,
+            n is number of training samples and k is number of classes.
+            y contains labers for these samples from 0 up to k - 1. Shape n.
+            The output is expected to be of shape k x k x (c + 1), where k is number of classes and c is number of combined classifiers.
+            As the coefficients should be symmetrical, only values above the diagonal are considered.
+
+        Args:
+            X (torch.tensor): Predictors.
+            y (torch.tensor): Labels.
+            val_X (torch.tensor, optional): Predictors for validation. Defaults to None.
+            val_y (torch.tensor, optional): Labels for validation. Defaults to None.
+            verbose (int, optional): Verbosity level. Defaults to 0.
+
+        Returns:
+            torch.tensor: Tensor of computed coefficients.
+        """
         pass
     
     def predict_proba(self, X, coupling_method, l=None, verbose=0, batch_size=None, coefs=None,
@@ -235,7 +258,7 @@ class GeneralLinearCombiner(GeneralCombiner):
         if verbose > 0:
             print("Starting predict proba with combining method {} and coupling method {}".format(self.name_, coupling_method))
         coup_m = coup_picker(coupling_method)
-        if coup_m is None and not return_lin_comb:
+        if coup_m is None:
             print("Unknown coupling method {} selected".format(coupling_method))
             return 1
  
@@ -502,7 +525,7 @@ class Logreg(GeneralLogreg):
             verbose (int, optional): Verbosity level. Defaults to 0.
 
         Returns:
-            torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
+            torch.tensor: Tensor of model coefficients. Shape (c + 1), where c is number of combined classifiers.
         """
         if self.sweep_C_:
             coefs, best_C = self._logreg_sweep_C(X, y, val_X=val_X, val_y=val_y, verbose=verbose)
@@ -600,7 +623,7 @@ class LogregTorch(GeneralLogreg):
             verbose (int, optional): Verbosity level. Defaults to 0.
 
         Returns:
-            torch.tensor: Tensor of model coefficients. Shape 1 × (c + 1), where c is number of combined classifiers.
+            torch.tensor: Tensor of model coefficients. Shape k x k × (c + 1), where c is number of combined classifiers.
         """
         c, n, k = X.shape
         # Expects equal number of samples for each class
