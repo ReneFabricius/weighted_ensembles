@@ -902,6 +902,26 @@ class Grad(GeneralLinearCombiner):
         return coefs
 
 
+class Random(GeneralLinearCombiner):
+    def __init__(self, c, k, req_val=False, fit_pairwise=False, combine_probs=False, uncert=False, device="cpu", dtype=torch.float, name="random"):
+        super().__init__(c=c, k=k, req_val=req_val, fit_pairwise=fit_pairwise, combine_probs=combine_probs, uncert=uncert, device=device, dtype=dtype, name=name)
+        
+    def train(self, X: torch.tensor = None, y: torch.tensor = None, val_X: torch.tensor = None, val_y: torch.tensor = None, verbose: int = 0) -> torch.tensor:
+        # For each pair of classes randomly pick one of the combined classifiers
+        rand_pick = torch.randint(low=0, high=self.c_, size=(self.k_, self.k_), device=self.dev_)
+        # Transform the pick into one hot encoding
+        rand_pick = torch.nn.functional.one_hot(rand_pick)
+        # Zeroe values on and under the diagonal.
+        triu_inds = tuple(torch.triu_indices(row=self.k_, col=self.k_, offset=0, device=self.dev_))
+        rand_pick = rand_pick.transpose(0, 1).index_put(indices=triu_inds, values=torch.tensor([0], device=self.dev_, dtype=rand_pick.dtype)).transpose(0, 1)
+        # Add zero intercept
+        rand_pick = torch.cat(
+            [rand_pick.to(dtype=self.dtp_), torch.zeros(size=(self.k_, self.k_, 1), device=self.dev_, dtype=self.dtp_)],
+            dim=2)
+        
+        return rand_pick
+
+
 class Net(torch.nn.Module):
     def __init__(self, c, k, device, dtype):
         super().__init__()
@@ -1103,7 +1123,8 @@ comb_methods = {"lda": [Lda, {"req_val": False}],
                 "neural_m2": [Neural, {"coupling_method": "m2"}],
                 "neural_bc": [Neural, {"coupling_method": "bc"}],
                 "logreg_torch": [LogregTorch, {"fit_interc": True, "req_val": False}],
-                "logreg_torch_no_interc": [LogregTorch, {"fit_interc": False, "req_val": False}]
+                "logreg_torch_no_interc": [LogregTorch, {"fit_interc": False, "req_val": False}],
+                "random": [Random, {}]
                 }
 
 regularization_coefficients = {

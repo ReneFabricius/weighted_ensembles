@@ -23,6 +23,7 @@ class Test_WLEFit(unittest.TestCase):
         assert(not torch.isnan(coefficients).any())
         assert(coefficients.dtype == dtype)
         assert(coefficients.device.type == device)
+        return wle
         
     def test_wle_fit_average_cpu_float(self):
         self._wle_fit(comb_m="average", device="cpu", dtype=torch.float32)
@@ -95,6 +96,18 @@ class Test_WLEFit(unittest.TestCase):
     
     def test_wle_fit_lda_cuda_double(self):
         self._wle_fit(comb_m="lda", device="cuda", dtype=torch.float64)
+
+    def test_wle_fit_random_cuda_float(self):
+        dev = "cuda"
+        dtp = torch.float32
+        wle = self._wle_fit(comb_m="random", device=dev, dtype=dtp)
+        coeffs = wle.comb_model_.coefs_
+        tr_c = tuple(torch.triu_indices(row=Test_WLEFit.k, col=Test_WLEFit.k, offset=1))
+        exp_sum = torch.zeros(size=(Test_WLEFit.k, Test_WLEFit.k), device=dev, dtype=dtp)
+        exp_sum.index_put_(indices=tr_c, values=torch.tensor([1], device=dev, dtype=dtp))
+        coefs_sum = torch.sum(coeffs, dim=2)
+        # Coefficients should have sum for each class pair above the diagonal equal to one.
+        assert((exp_sum == coefs_sum).all())  
     
 
 class Test_WLEPredict(unittest.TestCase):
