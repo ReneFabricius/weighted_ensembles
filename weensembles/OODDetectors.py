@@ -31,7 +31,7 @@ class MaximumSoftmaxProbability(OODDetector):
     
 class MaximumLogit(OODDetector):
     def __init__(self) -> None:
-        super().__init__(name="ML")
+        super().__init__(name="MLI")
         
     def get_scores(self, logits: torch.tensor) -> torch.tensor:
         """Computes ood score as 1 minus normalized max logits.
@@ -47,3 +47,22 @@ class MaximumLogit(OODDetector):
         max_score = torch.max(max_log)
         max_log = (max_log - min_score) / (max_score - min_score)
         return 1 - max_log
+
+class MaximumSoftmaxProbabilityFromProbs(OODDetector):
+    def __init__(self) -> None:
+        super().__init__(name="MSP")
+
+    def get_scores(self, probs: torch.tensor) -> torch.tensor:
+        """Computes ood score as 1 minus maximum probability.
+
+        Args:
+            probs (torch.tensor): Probabilistic classification. n x k tensor, where n is number of samples and k is number of classes.
+
+        Returns:
+            torch.tensor: Uncertainty scores in the range [0, 1].
+        """
+        max_probs, _ = torch.max(probs, dim=-1)
+        uncs = 1 - max_probs
+        thr = torch.nn.Threshold(threshold=0, value=0, inplace=True)
+        thr(uncs)
+        return uncs
