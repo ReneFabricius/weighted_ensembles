@@ -1,15 +1,11 @@
-from email.mime import base
 import re
-from textwrap import fill
-from attr import has
 import torch
 from timeit import default_timer as timer
 from sklearn.linear_model import LogisticRegression
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-from sklearn.utils import check_array
 from torch.special import expit
 import numpy as np
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 
 from weensembles.CalibratingMethods import cal_picker
 from weensembles.CouplingMethods import coup_picker

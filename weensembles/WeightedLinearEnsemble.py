@@ -1,11 +1,6 @@
-import numpy as np
 import torch
 import pickle
 import pandas as pd
-from scipy.stats import normaltest
-from timeit import default_timer as timer
-from torch._C import device
-from torch.special import expit
 
 from weensembles.CouplingMethods import coup_picker
 from weensembles.CombiningMethods import comb_picker

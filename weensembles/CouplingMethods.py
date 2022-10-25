@@ -1,6 +1,6 @@
 import torch
 from timeit import default_timer as timer
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import Tuple
 
 class CouplingMethod(ABC):

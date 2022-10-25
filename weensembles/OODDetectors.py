@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from pyrsistent import l
 import torch
 
 class OODDetector(ABC):

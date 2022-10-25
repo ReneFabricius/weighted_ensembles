@@ -4,7 +4,6 @@ import numpy as np
 import functools
 from weensembles.predictions_evaluation import compute_acc_topk
 from weensembles.WeightedLinearEnsemble import WeightedLinearEnsemble
-from weensembles.CombiningMethods import Logreg
 from weensembles.utils import cuda_mem_try
 
 

@@ -1,5 +1,4 @@
 import abc
-from abc import ABC
 
 import pandas as pd
 from torchmin import minimize
