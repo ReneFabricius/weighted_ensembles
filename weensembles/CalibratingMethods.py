@@ -7,8 +7,6 @@ from torch.nn import Softmax, LogSoftmax, NLLLoss
 import torch
 import re
 
-from zmq import device
-
 from weensembles.predictions_evaluation import ECE_sweep
 from weensembles.PostprocessingMethod import PostprocessingMethod
 from weensembles.utils import arguments_dict
