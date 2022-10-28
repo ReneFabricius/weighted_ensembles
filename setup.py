@@ -10,7 +10,6 @@ setup(name='weighted-ensembles',
             "torch>=1.12.0",
             "torchvision>=0.13.0",
             "pandas>=1.1.2",
-            "pytorch-minimize>=0.0.2",
             "psutil",
             "scikit-learn>=0.23.2",
             "numpy>=1.21.6"

@@ -1,9 +1,8 @@
 import abc
 
 import pandas as pd
-from torchmin import minimize
 from timeit import default_timer as timer
-from torch.nn import Softmax, LogSoftmax, NLLLoss
+from torch.nn import Softmax, CrossEntropyLoss
 import torch
 import re
 
@@ -72,14 +71,16 @@ class TemperatureScaling(CalibratingMethod):
     """
     Temperature scaling calibration method.
     """
-    def __init__(self, name, start_temp=1.0, max_iter=50, device=torch.device("cpu"), dtype=torch.float32):
+    def __init__(self, name, start_temp=1.0, max_iter=50, lr=0.01, device=torch.device("cpu"), dtype=torch.float32):
         """
         :param start_temp: Starting temperature. 1.0 means no change.
         :param max_iter: maximum number of iterations of optimizer
+        :param lr: learning rate
         """
         super().__init__(req_val=False, name=name, device=device, dtype=dtype)
         self.temp_ = torch.tensor([start_temp], device=device, dtype=dtype)
         self.max_iter_ = max_iter
+        self.lr_ = lr
 
     def _nll_loss(self, temp, logit_pred, tar):
         """
@@ -90,9 +91,8 @@ class TemperatureScaling(CalibratingMethod):
         :return: Scalar nll loss.
         """
 
-        l_sm = LogSoftmax(dim=1)
-        nll = NLLLoss()
-        loss = nll(l_sm(torch.div(logit_pred, temp)), tar)
+        cent = CrossEntropyLoss()
+        loss = cent(torch.div(logit_pred, temp), tar)
 
         return loss
 
@@ -109,7 +109,6 @@ class TemperatureScaling(CalibratingMethod):
 
         start = timer()
 
-        self.temp_.requires_grad_(True)        
         n, k = logit_pred.shape
 
         if verbose > 1:
@@ -117,16 +116,15 @@ class TemperatureScaling(CalibratingMethod):
             cur_loss = self._nll_loss(temp=self.temp_, logit_pred=logit_pred, tar=tar).item()
             cur_ece = ECE_sweep(pred=cal_pred, tar=tar)
             print("Strating fit. NLL: {:.4f}, estimated calibration error: {:.4f}".format(cur_loss, cur_ece))
-
-        opt = minimize(
-            fun=lambda tmp: self._nll_loss(temp=tmp, logit_pred=logit_pred, tar=tar),
-            x0=self.temp_,
-            max_iter= self.max_iter_,
-            method=solver,
-            disp=verbose)
-        self.temp_ = opt.x
         
-        self.temp_.requires_grad_(False)
+        temp = torch.nn.Parameter(self.temp_)
+        optimizer = torch.optim.LBFGS([temp], lr=self.lr_, max_iter=self.max_iter_)
+        def eval_():
+            optimizer.zero_grad()
+            loss = self._nll_loss(temp=temp, logit_pred=logit_pred, tar=tar)
+            loss.backward()
+            return loss
+        optimizer.step(eval_)
         
         end = timer()
 

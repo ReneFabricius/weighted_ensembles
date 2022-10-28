@@ -3,5 +3,8 @@ __pycache__/
 .idea/
 *.npy
 weighted_ensembles.egg-info/
+WeightedEnsembles.egg-info/
 .VSCodeCounter/
 dbg.py
+dist/
+build/
