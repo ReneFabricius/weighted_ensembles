@@ -22,3 +22,4 @@ Weighted Linear Ensemble can be used in custom applications by importing the Wei
 Usage of the algorithm is demonstrated in a colab notebook https://colab.research.google.com/drive/1dRccNaxzeRmPnXDKOzvXLmXs1Ovg2Tu3?usp=sharing
 
 Experiments with the Weighted Linear Ensemble are avilable in the repositories https://github.com/ReneFabricius/cifar_ens_2021 and https://github.com/ReneFabricius/ILSVRC2012_ens.
+Demo of the ensemble combining four networks trained on ImageNet1k is hosted at https://huggingface.co/spaces/fabricius/WLEnsemble.
