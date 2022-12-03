@@ -115,8 +115,8 @@ def pairwise_accuracies_penultimate(SS, tar):
     return torch.sum(ti == tar, dim=1) / float(n)
 
 
-def cuda_mem_try(fun, start_bsz, device, dec_coef=0.5, max_tries=None, verbose=0):
-    """Repeatedly to perform action specified by given function which could fail due to cuda oom.
+def cuda_mem_try(fun, start_bsz, device, dec_coef=0.5, max_tries=None, verbose=0, return_times=False):
+    """Repeatedly try to perform action specified by given function which could fail due to cuda oom.
     Each try is performed with lower batch size than previous.
 
     Args:
@@ -125,18 +125,36 @@ def cuda_mem_try(fun, start_bsz, device, dec_coef=0.5, max_tries=None, verbose=0
         dec_coef (float, optional): Coeficient used to multiplicatively decrease batch size. Defaults to 0.5.
         max_tries (int, optional): Maximum number of tries. If None, tries are not limited. Defaults to None.
     """
+    with torch.cuda.device(device):
+        start = torch.cuda.Event(enable_timing=True)
+        start_current = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        
     batch_size = start_bsz
     while batch_size > 0 and (max_tries is None or max_tries > 0):
         try:
+            with torch.cuda.device(device):
+                start_current.record()
             if verbose > 1:
                 print("Trying with batch size {}".format(batch_size))
-            return fun(batch_size)
+            ret = fun(batch_size)
+            with torch.cuda.device(device):
+                end.record()
+                torch.cuda.synchronize()
+                full_time = start.elapsed_time(end)
+                success_time = start_current.elapsed_time(end)
+            if return_times:
+                return ret, (full_time, success_time) 
+            return ret 
         except RuntimeError as rerr:
             str_err = str(rerr)
-            if "memory" not in str_err and "CUDA" not in str_err and "cuda" not in str_err and "INT_MAX" not in str_err: 
+            keys = ["memory", "CUDA", "cuda", "INT_MAX"]
+            if not any([k in str_err for k in keys]): 
                 raise rerr
             if verbose > 1:
                 print("CUDA oom exception")
+                print(rerr)
             batch_size = int(dec_coef * batch_size)
             if max_tries is not None:
                 max_tries -= 1
