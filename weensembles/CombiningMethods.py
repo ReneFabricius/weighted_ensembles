@@ -841,6 +841,7 @@ class Grad(GeneralLinearCombiner):
                 nll = compute_nll(pred=test_pred, tar=y)
                 print("Before training: acc {}, nll {}".format(acc, nll))
 
+        successful_mbatch_size = None
         for e in range(epochs):
             if verbose > 1:
                 print("Processing epoch {} out of {}".format(e, epochs))
@@ -853,7 +854,10 @@ class Grad(GeneralLinearCombiner):
                 if verbose > 1:
                     print("Epoch {}: [{}/{}]".format(e, batch_s + len(y_batch), n))
 
-                mbatch_sz = batch_sz
+                if successful_mbatch_size is None:
+                    mbatch_sz = batch_sz
+                else:
+                    mbatch_sz = successful_mbatch_size
                 finished = False
                 
                 while not finished and mbatch_sz > 0:
@@ -873,14 +877,18 @@ class Grad(GeneralLinearCombiner):
                         L2.backward()
                         opt.step()
                         finished = True
+                        successful_mbatch_size = mbatch_sz
 
-                    except RuntimeError as rerr:
+                    except Exception as rerr:
                         if 'memory' not in str(rerr) and "CUDA" not in str(rerr) and "cuda" not in str(rerr):
                             raise rerr
                         if verbose > 1:
                             print("OOM Exception")
+                            print(rerr)
                         del rerr
-                        mbatch_sz = int(0.5 * mbatch_sz)
+                        if coefs.grad is not None:
+                            del coefs.grad
+                        mbatch_sz = int(0.9 * mbatch_sz)
                         with torch.cuda.device(X.device):
                             torch.cuda.empty_cache()
                 
