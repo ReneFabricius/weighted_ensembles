@@ -16,9 +16,10 @@ class CalibrationEnsemble(Ensemble):
         """
         super().__init__(c=c, k=k, device=device, dtp=dtp)
         self.cal_models_ = [None for _ in range(c)]
+        self.constituent_names_ = None
 
     @torch.no_grad()
-    def fit(self, preds, labels, calibration_method, verbose=0, **kwargs):
+    def fit(self, preds, labels, calibration_method, verbose=0, constituent_names=None, **kwargs):
         """
         Fit the calibration model for each combined classifier.
         :param preds: Predictions from penultimate layer or logits.
@@ -26,6 +27,7 @@ class CalibrationEnsemble(Ensemble):
         :param labels: Correct labels. n tensor with n samples.
         :param calibration_method: Calibration method to use.
         :param verbose: Print extra info.
+        :param constituent_names: Correctly ordered list of ensemble constituent names.
         :return:
         """
 
@@ -33,6 +35,8 @@ class CalibrationEnsemble(Ensemble):
 
         assert c == self.c_
         assert k == self.k_
+        
+        self.constituent_names_ = constituent_names
 
         for ci in range(c):
             cal_m_obj = cal_picker(calibration_method, device=self.dev_, dtype=self.dtp_)

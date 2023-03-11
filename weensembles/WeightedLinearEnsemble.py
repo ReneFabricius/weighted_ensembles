@@ -19,10 +19,12 @@ class WeightedLinearEnsemble(Ensemble):
         """
         super().__init__(c=c, k=k, device=device, dtp=dtp)
         self.logit_eps_ = 1e-5
-        self.comb_model_ = None 
+        self.comb_model_ = None
+        self.constituent_names_ = None
 
     def fit(self, preds, labels, combining_method,
-            verbose=0, val_preds=None, val_labels=None, **kwargs):
+            verbose=0, val_preds=None, val_labels=None,
+            constituent_names=None, **kwargs):
         """
         Trains combining method on logits of several classifiers.
         
@@ -34,9 +36,12 @@ class WeightedLinearEnsemble(Ensemble):
             verbose (int): Verbosity level.
             val_preds (torch.tensor): Validation set used for hyperparameter sweep. Required if combining_method.req_val is True.
             val_labels (torch.tensor): Validation set targets. Required if combining_method.req_val is True. 
+            constituent_names (list): Correctly ordered list of ensemble constituent names.
         """
         if verbose > 0:
             print("Starting fit, combining method: {}".format(combining_method))
+            if constituent_names is not None:
+                print(f"Combining classifiers {' '.join(constituent_names)}")
         comb_m = comb_picker(combining_method, c=self.c_, k=self.k_, device=self.dev_, dtype=self.dtp_)
         if comb_m is None:
             raise ValueError("Unknown combining method {} selected".format(combining_method))
@@ -47,6 +52,7 @@ class WeightedLinearEnsemble(Ensemble):
         if inc_val and (val_preds is None or val_labels is None):
             raise ValueError("val_preds and val_labels are required for combining method {}".format(combining_method))
         
+        self.constituent_names_ = constituent_names
         self.comb_model_.fit(X=preds, y=labels, val_X=val_preds, val_y=val_labels, verbose=verbose, **kwargs)
         
             
