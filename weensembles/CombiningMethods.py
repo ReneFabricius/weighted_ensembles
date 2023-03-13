@@ -367,8 +367,11 @@ class GeneralLinearCombiner(GeneralCombiner):
         end = timer()
         if verbose > 0:
             print("Predict proba simple finished in " + str(end - start) + " s")
-
-        return ps_full, unc_full
+        
+        if predict_uncertainty:
+            return ps_full, unc_full
+        
+        return ps_full
 
     def score(self, X, y, coupling_method, coefs=None):
         """Computes accuracy of model with given coefficients on given data.

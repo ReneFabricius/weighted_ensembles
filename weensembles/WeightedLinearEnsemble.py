@@ -110,6 +110,10 @@ class WeightedLinearEnsemble(Ensemble):
 
         keep_dev = self.dev_
         self.__dict__.update(dump_dict)
+        if verbose > 0:
+            print(f"Loaded model combining {self.c_} classifiers of {self.k_} classes")
+            if self.constituent_names_ is not None:
+                print(f"Constituent names: {self.constituent_names_}")
         self.dev_ = keep_dev
         if self.comb_model_ is not None:
             self.comb_model_.set_dev(self.dev_)
