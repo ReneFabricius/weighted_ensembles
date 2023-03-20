@@ -47,7 +47,7 @@ class CalibrationEnsemble(Ensemble):
             self.cal_models_[ci].fit(preds[ci], labels, verbose=verbose)
 
     @torch.no_grad()
-    def predict_proba(self, preds, output_net_preds=False):
+    def predict_proba(self, preds, output_net_preds=False, verbose=0):
         """
         Combines the outputs of classifiers and produces probabilities.
         :param output_net_preds: If True, method also outputs calibrated network predictions.
