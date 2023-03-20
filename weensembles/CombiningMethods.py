@@ -872,7 +872,7 @@ class Grad(GeneralLinearCombiner):
                             X_mb = X_batch[:, mbatch_s:(mbatch_s + mbatch_sz)]
                             y_mb = y_batch[mbatch_s:(mbatch_s + mbatch_sz)]
                             pred = thresh(self.predict_proba(X=X_mb, l=k, coupling_method=self.coupling_m_,
-                                                                verbose=max(verbose - 2, 0), batch_size=mbatch_sz, coefs=coefs)[0])
+                                                                verbose=max(verbose - 2, 0), batch_size=mbatch_sz, coefs=coefs))
                             loss = nll_loss(torch.log(pred), y_mb) * (len(y_mb) / len(y_batch))
                             loss.backward()
                         
