@@ -596,7 +596,7 @@ class LogregTorch(GeneralLogreg):
     """Combining method which uses logistic regression implemented in pytorch to infer combining coefficients.
     """
     def __init__(self, c, k, fit_interc, name, req_val, uncert, device="cpu", dtype=torch.float, base_C=1.0, max_iter=15000, tolg=1e-5, tolch=1e-9,
-                 learning_rate=0.1, line_search=False):
+                 learning_rate=0.1, line_search=False, penalty="l2"):
         super().__init__(c=c, k=k, uncert=uncert, req_val=req_val, fit_pairwise=False, fit_interc=fit_interc,
                          base_C=base_C, device=device, dtype=dtype, name=name)
         self.max_iter_ = int(max_iter)
@@ -607,6 +607,8 @@ class LogregTorch(GeneralLogreg):
             self.line_search_ = 'strong_wolfe'
         else:
             self.line_search_ = None
+        assert penalty in ["l1", "l2"]
+        self.penalty_ = penalty
         
     def train(self, X, y, val_X=None, val_y=None, verbose=0):
         """Trains logistic regression model for a pair of classes and outputs its coefficients.
@@ -659,6 +661,10 @@ class LogregTorch(GeneralLogreg):
             torch.tensor: fitted coefficients. shape: k x k x c + int(fit_intercept). Only models where k1 < k2 have nonzero coefficients.
         """
         grad_accumulating = micro_batch is not None and micro_batch < (n // k * 2)
+        if self.penalty_ == "l1":
+            penalty_fun = lambda arg: torch.sum(torch.abs(arg))
+        elif self.penalty_ == "l2":
+            penalty_fun = lambda arg: torch.sum(torch.pow(arg, 2))
         
         coefs = torch.zeros(size=(k, k, c + int(self.fit_interc_)), device=self.dev_, dtype=self.dtp_, requires_grad=True)
         X_pw.requires_grad_(False)
@@ -694,12 +700,12 @@ class LogregTorch(GeneralLogreg):
                 loss_accum += loss
 
             if self.fit_interc_:
-                L2 = torch.sum(torch.pow(coefs[:,:,:-1][upper_mask], 2))
+                penalty = penalty_fun(coefs[:,:,:-1][upper_mask])
             else:
-                L2 = torch.sum(torch.pow(coefs[upper_mask], 2))
-            L2 /= (self.base_C_ * c)
-            L2.backward(retain_graph=False)
-            loss_accum += L2
+                penalty = penalty_fun(coefs[upper_mask])
+            penalty /= (self.base_C_ * c)
+            penalty.backward(retain_graph=False)
+            loss_accum += penalty
 
             return loss_accum
             
@@ -1131,6 +1137,8 @@ comb_methods = {"lda": [Lda, {"req_val": False}],
                 "neural_bc": [Neural, {"coupling_method": "bc"}],
                 "logreg_torch": [LogregTorch, {"fit_interc": True, "req_val": False}],
                 "logreg_torch_no_interc": [LogregTorch, {"fit_interc": False, "req_val": False}],
+                "logreg_torch_l1": [LogregTorch, {"fit_interc": True, "req_val": False, "penalty": "l1"}],
+                "logreg_torch_l1_no_interc": [LogregTorch, {"fit_interc": False, "req_val": False, "penalty": "l1"}],
                 "random": [Random, {}]
                 }
 
