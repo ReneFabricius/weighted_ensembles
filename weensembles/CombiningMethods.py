@@ -784,10 +784,11 @@ class Average(GeneralLinearCombiner):
 class Grad(GeneralLinearCombiner):
     """Combining method which trains its coefficient in an end-to-end manner using gradient descent.
     """
-    def __init__(self, c, k, coupling_method, uncert, name, device="cpu", dtype=torch.float, base_C=1.0):
+    def __init__(self, c, k, coupling_method, uncert, name, device="cpu", dtype=torch.float, base_C=1.0, fit_interc=True):
         super().__init__(c=c, k=k, uncert=uncert, req_val=False, fit_pairwise=False, combine_probs=False, device=device, dtype=dtype, name=name)
         self.coupling_m_ = coupling_method
         self.base_C_ = base_C
+        self.fit_interc_ = fit_interc
         
     def train(self, X, y, val_X=None, val_y=None, verbose=0):
         """Computes and outputs coefficients.
@@ -829,8 +830,11 @@ class Grad(GeneralLinearCombiner):
         """
         c, n, k = X.shape
         
-        coefs = torch.full(size=(k, k, c + 1), fill_value=1.0 / c, device=self.dev_, dtype=self.dtp_)
-        coefs[:, :, c] = 0
+        coefs = torch.full(size=(k, k, c + int(self.fit_interc_)), fill_value=1.0 / c, device=self.dev_, dtype=self.dtp_)
+        if self.fit_interc_:
+            coefs[:, :, c] = 0
+        if not self.fit_interc_:
+            biases = torch.zeros(size=(k, k, 1), device=self.dev_, dtype=self.dtp_)
         coefs.requires_grad_(True)
         X.requires_grad_(False)
         y.requires_grad_(False)
@@ -843,7 +847,7 @@ class Grad(GeneralLinearCombiner):
             with torch.no_grad():
                 test_bsz = X.shape[1]
                 test_pred, _ = cuda_mem_try(
-                    fun=lambda bsz: self.predict_proba(X=X, l=k, coupling_method=self.coupling_m_, verbose=max(verbose - 2, 0), batch_size=bsz, coefs=coefs),
+                    fun=lambda bsz: self.predict_proba(X=X, l=k, coupling_method=self.coupling_m_, verbose=max(verbose - 2, 0), batch_size=bsz, coefs=coefs if self.fit_interc_ else torch.cat((coefs, biases), dim=-1)),
                     start_bsz=test_bsz, verbose=verbose, device=X.device)
                 
                 acc = compute_acc_topk(pred=test_pred, tar=y, k=1)
@@ -878,11 +882,12 @@ class Grad(GeneralLinearCombiner):
                             X_mb = X_batch[:, mbatch_s:(mbatch_s + mbatch_sz)]
                             y_mb = y_batch[mbatch_s:(mbatch_s + mbatch_sz)]
                             pred = thresh(self.predict_proba(X=X_mb, l=k, coupling_method=self.coupling_m_,
-                                                                verbose=max(verbose - 2, 0), batch_size=mbatch_sz, coefs=coefs))
+                                                                verbose=max(verbose - 2, 0), batch_size=mbatch_sz,
+                                                                coefs=coefs if self.fit_interc_ else torch.cat((coefs, biases), dim=-1)))
                             loss = nll_loss(torch.log(pred), y_mb) * (len(y_mb) / len(y_batch))
                             loss.backward()
                         
-                        L2 = torch.sum(torch.pow(coefs[:,:,:-1], 2)) / (k * (k - 1) * c) / self.base_C_
+                        L2 = torch.sum(torch.pow(coefs[:,:,:-1] if self.fit_interc_ else coefs, 2)) / (k * (k - 1) * c) / self.base_C_
                         L2.backward()
                         opt.step()
                         finished = True
@@ -904,7 +909,7 @@ class Grad(GeneralLinearCombiner):
             if test_period is not None and (e + 1) % test_period == 0:
                 with torch.no_grad():
                     test_pred, _ = cuda_mem_try(
-                        fun=lambda bsz: self.predict_proba(X=X, l=k, coupling_method=self.coupling_m_, verbose=max(verbose - 2, 0), batch_size=bsz, coefs=coefs),
+                        fun=lambda bsz: self.predict_proba(X=X, l=k, coupling_method=self.coupling_m_, verbose=max(verbose - 2, 0), batch_size=bsz, coefs=coefs if self.fit_interc_ else torch.cat((coefs, biases), dim=-1)),
                         start_bsz=test_bsz, verbose=verbose, device=X.device)
 
                     acc = compute_acc_topk(pred=test_pred, tar=y, k=1)
@@ -912,7 +917,7 @@ class Grad(GeneralLinearCombiner):
                     print("Test epoch {}: acc {}, nll {}".format(e, acc, nll))
 
         coefs.requires_grad_(False)
-        return coefs
+        return coefs if self.fit_interc_ else torch.cat((coefs, biases), dim=-1)
 
 
 class Random(GeneralLinearCombiner):
@@ -1132,6 +1137,9 @@ comb_methods = {"lda": [Lda, {"req_val": False}],
                 "grad_m1": [Grad, {"coupling_method": "m1"}],
                 "grad_m2": [Grad, {"coupling_method": "m2"}],
                 "grad_bc": [Grad, {"coupling_method": "bc"}],
+                "grad_no_interc_m1": [Grad, {"coupling_method": "m1", "fit_interc": False}],
+                "grad_no_interc_m2": [Grad, {"coupling_method": "m2", "fit_interc": False}],
+                "grad_no_interc_bc": [Grad, {"coupling_method": "bc", "fit_interc": False}],
                 "neural_m1": [Neural, {"coupling_method": "m1"}],
                 "neural_m2": [Neural, {"coupling_method": "m2"}],
                 "neural_bc": [Neural, {"coupling_method": "bc"}],
@@ -1152,10 +1160,13 @@ regularization_coefficients = {
     "logreg_no_interc.uncert": {"base_C": 10 ** (1.6)},
     "logreg_torch_no_interc.uncert": {"base_C": 10 ** (1.6)},
     "grad_bc": {"base_C": 10 ** (-0.4)},
+    "grad_no_interc_bc": {"base_C": 10 ** (-0.4)},
     "grad_bc.uncert": {"base_C": 10 ** (0.0)},
     "grad_m1": {"base_C": 10 ** (-0.2)},
+    "grad_no_interc_m1": {"base_C": 10 ** (-0.2)},
     "grad_m1.uncert": {"base_C": 10 ** (0.0)},
     "grad_m2": {"base_C": 10 ** (-0.6)},
+    "grad_no_interc_m2": {"base_C": 10 ** (-0.6)},
     "grad_m2.uncert": {"base_C": 10 ** (0.0)}   
 }
 
