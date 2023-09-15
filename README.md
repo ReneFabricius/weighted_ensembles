@@ -1,4 +1,4 @@
-# Weighted Linear Ensemble
+# Pairwise Weighted Ensemble
 Weighted Linear Ensemble is a multiclass classification ensembling algorithm based on weighted combination of class pairs pairwise probabilities and pairwise coupling.
 It is able to combine variable number of multiclass probabilistic classifiers producing probabilistic classification in the same set of classes.
 This ensembling method employs several trainable linear classifier models to combine pairwise probabilities from different ensemble constituents, therefore, it requires training.
